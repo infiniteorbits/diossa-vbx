@@ -21,31 +21,24 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading yolov3-tiny-coco..."
-rm -rf tensorflow-yolo-v3
-git clone https://github.com/mystic123/tensorflow-yolo-v3
-
-[ -f yolov3-tiny.weights ] || wget https://pjreddie.com/media/files/yolov3-tiny.weights
+echo "Downloading yolov2..."
+[ -f yolov2.cfg ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov2.cfg
+[ -f yolov2.weights ] || wget https://pjreddie.com/media/files/yolov2.weights
 [ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-cd tensorflow-yolo-v3
-python ./convert_weights_pb.py --tiny --class_names ../coco.names --weights_file ../yolov3-tiny.weights --data_format NHWC
-
-cd ../
-cp tensorflow-yolo-v3/frozen_darknet_yolov3_model.pb yolov3-tiny.pb
+python $VBX_SDK/example/python/darknet_to_onnx.py yolov2.cfg
 
 echo "Running Model Optimizer..."
 # model details @ https://pjreddie.com/darknet/yolo/
-converter --input_model yolov3-tiny.pb \
---framework tf \
---input_shape [1,416,416,3] \
---reverse_input_channels \
---tensorflow_use_custom_operations_config $VBX_SDK/python/third_party/dldt/model-optimizer/extensions/front/tf/yolo_v3_tiny.json \
+converter --input_model yolov2.onnx \
+--framework onnx \
+--input_shape [1,3,608,608] \
+--scale_values=[255.] \
 --static_shape 
 
 echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x yolov3-tiny.xml  -c V1000 -f ../../sample_images -o yolov3-tiny-coco.vnnx
+generate_vnnx -x yolov2.xml  -c V1000 -f ../../sample_images -o yolov2.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/yolov3.py yolov3-tiny-coco.vnnx ../../dog.416.jpg
+python $VBX_SDK/example/python/yoloInfer.py yolov2.vnnx ../../dog.jpg -j yolov2.json -l coco.names
 
 deactivate
