@@ -97,7 +97,7 @@ int main(int argc, char** argv){
 	//(or two output buffers for yolo v3)
 	uint8_t* input_buffer=NULL;
 	void* read_buffer=NULL;
-	if(argc >2){
+	if(std::string(argv[2]) != "TEST_DATA"){
 	  int input_datatype = model_get_input_datatype(model,0);
 	  int input_length = model_get_input_length(model,0);
 	  int side = 1;
@@ -122,75 +122,144 @@ int main(int argc, char** argv){
 	//buffers are now setup,
 	//we can run the model.
 
-	vbx_cnn_model_start(vbx_cnn,model,io_buffers);
+	vbx_cnn_model_start(vbx_cnn, model, io_buffers);
 	int err=1;
-	while(err>0){
+	while (err>0) {
 		err = vbx_cnn_model_poll(vbx_cnn);
 	}
-	if(err<0){
+	if (err<0) {
 		printf("Model Run failed with error code: %d\n",err);
 	}
-    //data should be available int the output buffers now.
-	if(post_process_str=="CLASSIFY"){
+	//data should be available int the output buffers now.
+	if (post_process_str=="CLASSIFY") {
 	  const int topk=10;
 	  int16_t indices[topk];
 	  post_process_classifier(output_buffer0,output_length,indices,topk);
-	  for(int i=0;i<topk;++i){
+	  for(int i = 0;i < topk; ++i){
 		int idx = indices[i];
 		int score = output_buffer0[idx];
-		printf("%d, %d, %s, %d.%03d\n",
-			   i,idx,imagenet_classes[idx],score>>16,(score*1000)>>16);
+		printf("%d, %d, %s, %d.%03d\n", i, idx, imagenet_classes[idx], score>>16, (score*1000)>>16);
 	  }
-	} else if(post_process_str == "TINYYOLOV2" || post_process_str == "YOLOV2"){
-      // tiny yolov2 voc
-		int valid_boxes;
-		fix16_box boxes[13*13*5];
-        if(post_process_str == "TINYYOLOV2"){
-          post_process_tiny_yolov2_voc(output_buffer0, &valid_boxes, boxes,13*13*5);
-        }else{
-          post_process_yolov2_voc(output_buffer0, &valid_boxes, boxes,13*13*5);
-        }
+	} else if (post_process_str == "TINYYOLOV2" || post_process_str == "YOLOV2" || post_process_str == "TINYYOLOV3"){
+		char **class_names = NULL;
+		int valid_boxes = 0;
+		fix16_box boxes[1024];
+		int max_boxes = 100;
+		float thresh = 0.3;
+		float iou = 0.4;
+
+		if(post_process_str == "TINYYOLOV2"){ //tiny yolo v2 VOC
+			class_names = voc_classes;
+			int num_outputs = 1;
+			fix16_t *outputs[] = {output_buffer0};
+			float anchors[] ={1.08, 1.19, 3.42, 4.41, 6.63, 11.38, 9.42, 5.11, 16.620001, 10.52};
+
+			yolo_info_t cfg_0 = {
+				.version = 2,
+				.input_dims = {3, 416, 416},
+				.output_dims = {125, 13, 13},
+				.coords = 4,
+				.classes = 20,
+				.num = 5,
+				.anchors_length = 10,
+				.anchors = anchors,
+			};
+			yolo_info_t cfg[] = {cfg_0};
+
+			valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
+
+		} else if (post_process_str == "YOLOV2"){ //yolo v2 VOC
+			class_names = voc_classes;
+			int num_outputs = 1;
+			fix16_t *outputs[] = {output_buffer0};
+			float anchors[] = {1.3221, 1.73145, 3.19275, 4.00944, 5.05587, 8.09892, 9.47112, 4.84053, 11.2364, 10.0071};
+
+			yolo_info_t cfg_0 = {
+				.version = 2,
+				.input_dims = {3, 416, 416},
+				.output_dims = {125, 13, 13},
+				.coords = 4,
+				.classes = 20,
+				.num = 5,
+				.anchors_length = 10,
+				.anchors = anchors,
+			};
+			yolo_info_t cfg[] = {cfg_0};
+
+			valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
+
+		} else if (post_process_str == "TINYYOLOV3"){ //tiny yolo v3 COCO
+			class_names = coco_classes;
+			int num_outputs = 2;
+			fix16_t *outputs[] = {output_buffer0, output_buffer1};
+			float anchors[] = {10,14,23,27,37,58,81,82,135,169,344,319}; // 2*num
+			int mask_0[] = {3,4,5};
+			int mask_1[] = {1,2,3};
+
+			yolo_info_t cfg_0 = {
+				.version = 3,
+				.input_dims = {3, 416, 416},
+				.output_dims = {255, 13, 13},
+				.coords = 4,
+				.classes = 80,
+				.num = 6,
+				.anchors_length = 12,
+				.anchors = anchors,
+				.mask_length = 3,
+				.mask = mask_0,
+			};
+
+			yolo_info_t cfg_1 = {
+				.version = 3,
+				.input_dims = {3, 416, 416},
+				.output_dims = {255, 26, 26},
+				.coords = 4,
+				.classes = 80,
+				.num = 6,
+				.anchors_length = 12,
+				.anchors = anchors,
+				.mask_length = 3,
+				.mask = mask_1,
+			};
+
+			yolo_info_t cfg[] = {cfg_0, cfg_1};
+
+			valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
+		}
+
+		char class_str[50];
 		for(int i=0;i<valid_boxes;++i){
 			if(boxes[i].confidence == 0){
 				continue;
 			}
-			printf("%s %.2f box:(%d,%d) (%d,%d)\n",
-			       boxes[i].class_name,
-			       fix16_to_float(boxes[i].confidence),
-			       boxes[i].xmin,boxes[i].ymin,
-			       boxes[i].xmax,boxes[i].ymax);
-		}
-	} else if(post_process_str == "TINYYOLOV3"){
-		int valid_boxes;
-		fix16_box boxes[100];
-		post_process_tiny_yolov3_coco(output_buffer0, output_buffer1, &valid_boxes, boxes,100);
-		for(int i=0;i<valid_boxes;++i){
-			if(boxes[i].confidence == 0){
-				continue;
+
+			if (class_names) { //class_names must be set, or prints the class id
+				boxes[i].class_name = class_names[boxes[i].class_id];
+				sprintf(class_str, "%s", boxes[i].class_name);
+			} else {
+				sprintf(class_str, "%d", boxes[i].class_id);
 			}
-			printf("%s %.2f box:(%d,%d) (%d,%d)\n",
-			       boxes[i].class_name,
-			       fix16_to_float(boxes[i].confidence),
-			       boxes[i].xmin,boxes[i].ymin,
-			       boxes[i].xmax,boxes[i].ymax);
+
+			printf("%s\t%.2f\t(%d, %d, %d, %d)\n",
+					class_str,
+					fix16_to_float(boxes[i].confidence),
+					boxes[i].xmin,boxes[i].xmax,
+					boxes[i].ymin,boxes[i].ymax);
 		}
-	}else{
-      printf("Unknown post processing type %s, skipping post process\n",
-             post_process_str.c_str());
-    }
+	} else {
+		printf("Unknown post processing type %s, skipping post process\n",
+				post_process_str.c_str());
+	}
 
 	int32_t checksum = fletcher32((uint16_t*)io_buffers[1], output_length*2);
-	if(io_buffers[2]){
+	if (io_buffers[2]) {
 	  checksum ^= fletcher32((uint16_t*)io_buffers[2], output_length1*2);
 	}
 	printf("CHECKSUM = 0x%08x\n",checksum);
-	if(read_buffer){
+	if (read_buffer) {
 		free(read_buffer);
 	}
 	free(model);
 
-
-
 	return 0;
-
 }

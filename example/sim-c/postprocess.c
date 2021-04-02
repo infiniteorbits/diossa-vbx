@@ -1,9 +1,10 @@
 #include "postprocess.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <assert.h>
 
-char *imagenet_classes[] = {
+char *imagenet_classes[1000] = {
 							"tench",
 							"goldfish",
 							"great white shark",
@@ -1007,13 +1008,9 @@ char *imagenet_classes[] = {
 };
 
 
-char *coco_classes[] = {"person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"};
+char *coco_classes[80] = {"person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"};
 
-char *voc_classes[] = { "Aeroplane", "Bicycle", "Bird", "Boat", "Bottle", "Bus", "Car", "Cat", "Chair", "Cow", "Diningtable", "Dog", "Horse", "Motorbike", "Person", "Pottedplant","Sheep","Sofa", "Train", "TV/Monitor"};
-
-char *person_classes[] = { "person", "male", "female"};
-char *gender_classes[] = { "male", "female"};
-char *car_classes[] = { "car", "xl_car"};
+char *voc_classes[20] = { "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant","sheep","sofa", "train", "tv/monitor"};
 
 
 int partition(fix16_t* arr, int16_t *index, const int lo, const int hi)
@@ -1231,12 +1228,13 @@ int fix16_clean_boxes(fix16_box *boxes, int total, int width, int height)
 
 void post_process_classifier(fix16_t *outputs, const int out_sz, int16_t* output_index, int topk)
 {
-  fix16_t cached_output[1000];
-  assert(out_sz<=1000);
+
+  fix16_t* cached_output=malloc(out_sz*sizeof(*cached_output));
   for(int i=0;i<out_sz;++i){
 	cached_output[i] = outputs[i];
   }
   post_classifier(cached_output, out_sz, output_index, topk);
+  free(cached_output);
 }
 
 int fix16_get_region_boxes(fix16_t *predictions, fix16_t *biases, const int w, const int h, const int ln, const int classes, fix16_t w_ratio, fix16_t h_ratio, fix16_t thresh, fix16_t log_odds, fix16_box *boxes,int max_boxes, const int do_logistic, const int do_softmax, const int version)
@@ -1244,7 +1242,7 @@ int fix16_get_region_boxes(fix16_t *predictions, fix16_t *biases, const int w, c
   int box_count = 0;
 
   int num_size=(classes+5) *w*h;
-  fix16_t box[80+4];
+  fix16_t box[classes+4];
   for(int r=0;r<h;r++){
 	for(int c=0;c<w;c++){
         fix16_t row = fix16_from_int(r);
@@ -1303,33 +1301,47 @@ int fix16_get_region_boxes(fix16_t *predictions, fix16_t *biases, const int w, c
   return box_count;
 }
 
-
-int post_process_yolo(fix16_t **outputs, int *output_sizes, const int num_outputs,
-					  float **biases, int* dims,
-                      float thresh, float overlap, const int num, const int classes,
-                      fix16_box fix16_boxes[], int max_boxes,const int version)
+int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg,
+                      float thresh, float overlap, fix16_box fix16_boxes[], int max_boxes)
 {
-
   int total_box_count = 0;
+  int input_h  = cfg[0].input_dims[1];
+  int input_w  = cfg[0].input_dims[2];
+  float *anchors = cfg[0].anchors;
 
   for (int o = 0; o < num_outputs; o++) {
 	fix16_t *out32 = outputs[o];
-	int dim = dims[o];
+
+	int num_per_output = cfg[o].num;
+	if (num_outputs > 1) num_per_output = cfg[o].mask_length;
 
 	fix16_t fix16_thresh = fix16_from_float(thresh);
 	fix16_t fix16_log_odds = fix16_log(fix16_div(fix16_thresh, fix16_sub(fix16_one, fix16_thresh)));
-	fix16_t fix16_biases[2*num];
+	fix16_t fix16_biases[2*num_per_output];
 
-	fix16_t w_ratio = fix16_mul(fix16_div(416, dim), fix16_one); //precompute
-	fix16_t h_ratio = fix16_mul(fix16_div(416, dim), fix16_one); //precompute
+	int h  = cfg[o].output_dims[1];
+	int w  = cfg[o].output_dims[2];
 
-	for (int i = 0; i < 2*num; i++) {
-	  fix16_biases[i] = fix16_from_float(biases[o][i]);
+	fix16_t h_ratio = fix16_mul(fix16_div(input_h, h), fix16_one); //precompute
+	fix16_t w_ratio = fix16_mul(fix16_div(input_w, w), fix16_one); //precompute
+
+	for (int i = 0; i < num_per_output; i++) {
+	  int mask = i;
+	  if (num_outputs > 1) mask = cfg[o].mask[i];
+
+	  if (cfg[o].version == 2) {
+	    fix16_biases[2*i] = fix16_from_float(anchors[2*mask]*input_w/w);
+	    fix16_biases[2*i+1] = fix16_from_float(anchors[2*mask+1]*input_h/h);
+	  } else {
+	    fix16_biases[2*i] = fix16_from_float(anchors[2*mask]);
+	    fix16_biases[2*i+1] = fix16_from_float(anchors[2*mask+1]);
+	  }
 	}
 
-	int fix16_box_count = fix16_get_region_boxes(out32, fix16_biases, dim, dim, num, classes, w_ratio,
+	int fix16_box_count = fix16_get_region_boxes(out32, fix16_biases, w, h, num_per_output, cfg[o].classes, w_ratio,
 												 h_ratio, fix16_thresh, fix16_log_odds,
-												 fix16_boxes + total_box_count,max_boxes-total_box_count, 1, 1, version);
+												 fix16_boxes + total_box_count,max_boxes-total_box_count, 1, 1, cfg[o].version);
+	fflush(stdout);
 
 	// copy boxes
 	total_box_count += fix16_box_count;
@@ -1342,65 +1354,7 @@ int post_process_yolo(fix16_t **outputs, int *output_sizes, const int num_output
   fix16_t fix16_overlap = fix16_from_float(overlap);
   fix16_do_nms(fix16_boxes, total_box_count, fix16_overlap);
 
-  int clean_box_count =fix16_clean_boxes(fix16_boxes, total_box_count, 416, 416);
+  int clean_box_count = fix16_clean_boxes(fix16_boxes, total_box_count, input_w, input_h);
 
   return clean_box_count;
 }
-
-void post_process_tiny_yolov2_voc(fix16_t *outputs, int* detections, fix16_box fix16_boxes[],int max_boxes)
-{
-
-  int num = 5;
-  int classes = 20;
-  float biases[] ={32*1.08, 32*1.19, 32*3.42, 32*4.41, 32*6.63, 32*11.38, 32*9.42, 32*5.11, 32*16.620001, 32*10.52};
-  int output_lengths[] = {13*13*(5+20)*5};
-  fix16_t *all_outputs[] = {outputs};
-  float *all_biases[] = {biases};
-  int dims[] = {13};
-  *detections = post_process_yolo(all_outputs, output_lengths, 1,
-								  all_biases,dims, 0.3, 0.4, num, classes,
-								  fix16_boxes,max_boxes, 2);
-
-  for(int i=0;i<*detections;++i){
-	fix16_boxes[i].class_name = voc_classes[fix16_boxes[i].class_id];
-  }
-}
-
-void post_process_yolov2_voc(fix16_t *outputs, int* detections, fix16_box fix16_boxes[],int max_boxes)
-{
-
-  int num = 5;
-  int classes = 20;
-  float biases[] = {32*1.3221, 32*1.73145, 32*3.19275, 32*4.00944, 32*5.05587, 32*8.09892, 32*9.47112, 32*4.84053, 32*11.2364, 32*10.0071};
-  int output_lengths[] = {13*13*(5+20)*5};
-  fix16_t *all_outputs[] = {outputs};
-  float *all_biases[] = {biases};
-  int dims[] = {13};
-  *detections = post_process_yolo(all_outputs, output_lengths, 1,
-								  all_biases,dims, 0.3, 0.4, num, classes,
-								  fix16_boxes,max_boxes, 2);
-
-  for(int i=0;i<*detections;++i){
-	fix16_boxes[i].class_name = voc_classes[fix16_boxes[i].class_id];
-  }
-}
-
-void post_process_tiny_yolov3_coco(fix16_t *outputs0, fix16_t *outputs1, int *detections, fix16_box fix16_boxes[],int max_boxes)
-{
-
-  int num = 3;
-  int classes = 80;
-  float biases0[] = {81,82,135,169,344,319};
-  float biases1[] = {23,27,37,58,81,82};
-  int output_lengths[] = {13*13*(5+80)*3, 26*26*(5+80)*3};
-  fix16_t *all_outputs[] = {outputs0, outputs1};
-  float *all_biases[] = {biases0, biases1};
-  int dims[] = {13, 26};
-  *detections = post_process_yolo(all_outputs, output_lengths, 2,
-								  all_biases, dims, 0.3, 0.4, num, classes,
-								  fix16_boxes, max_boxes,3);
-
-  for(int i=0;i<*detections;++i){
-	fix16_boxes[i].class_name = coco_classes[fix16_boxes[i].class_id];
-  }
- }
