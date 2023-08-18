@@ -1,10 +1,10 @@
 #include "postprocess.h"
 #include <stdio.h>
-#include "../lpr/lprDetectDemo.h"
 
 
 const float lpr_anchors[3][2] = {{180.0,52.0}, {60.0,18.0}, {20.0,7.0}};
 static fix16_t fix16_half = F16(.5);
+static fix16_t fix16_nthous = F16(-1000);
 
 #define maxPreDetects 64
 
@@ -50,10 +50,22 @@ void kpsToXywh(fix16_t* kps, fix16_t* location) {
     location[3] = h;
 }
 
-int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], int image_width, int image_height,
+
+void kpsToLTRB(fix16_t* kps, fix16_t* location) {
+    fix16_t left = MIN(MIN(kps[0], kps[2]), MIN(kps[2], kps[4]));
+    fix16_t right = MAX(MAX(kps[0], kps[2]), MAX(kps[2], kps[4]));
+    fix16_t top = MIN(MIN(kps[1], kps[3]), MIN(kps[5], kps[7]));
+    fix16_t bottom = MAX(MAX(kps[1], kps[3]), MAX(kps[5], kps[7]));
+    location[0] = left;
+    location[1] = top;
+    location[2] = right;
+    location[3] = bottom;
+}
+
+int post_process_lpd(object_t objects[],int max_objects, fix16_t *detectOutputs[9], int image_width, int image_height,
 					fix16_t confidence_threshold, fix16_t nms_threshold,int detectNumOutputs) {
 
-	const int mapStrides[3] = {32,16,8};
+    const int mapStrides[3] = {32,16,8};
     int h32 = image_height/32;  // image height at stride=32
     int w32 = image_width/32;  // image width at stride=32
     int h16 = h32<<1;
@@ -124,10 +136,10 @@ int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], 
         }
     }
 
-    int platesLength = 0;
+    int length = 0;
     for(int n = 0; n < orderLength; n++) {
     	int ind = order[n];
-        plates[platesLength].detect_Score = scores[ind];
+        objects[length].detect_score = scores[ind];
 
         // get map number from index
         int mapNum = 0;
@@ -153,7 +165,7 @@ int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], 
         int x = ind - y*mapSizes[mapNum][1];
 
         // get prior
-        plates[platesLength].stride = mapStrides[mapNum];
+        //objects[length].stride = mapStrides[mapNum];
 
         fix16_t raw[6];
         fix16_t* current_output_layer = shapeOutput[mapNum];
@@ -203,17 +215,19 @@ int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], 
 
         if(detectNumOutputs == 6){
         	xywhssToKps(xywhss, kps); //pass both the xywhss array and the keypoints per specified plate
-            kpsToXywh(kps, location); //update from keypoints in location
+            //kpsToXywh(kps, location); //update from keypoints in location
+            kpsToLTRB(kps, location); //update from keypoints in location
         }
-        plates[platesLength].lpbox[0] = location[0];
-        plates[platesLength].lpbox[1] = location[1];
-        plates[platesLength].lpbox[2] = location[2];
-        plates[platesLength].lpbox[3] = location[3];
+        objects[length].box[0] = location[0];
+        objects[length].box[1] = location[1];
+        objects[length].box[2] = location[2];
+        objects[length].box[3] = location[3];
 
         // NMS
         int passNms = 1;
-        for(int f=0; f<platesLength; f++){
-        	fix16_t iou = calcIou_XYWH(plates[f].lpbox, plates[platesLength].lpbox);
+        for(int f=0; f<length; f++){
+        	//fix16_t iou = calcIou_XYWH(objects[f].box, objects[length].box);
+        	fix16_t iou = calcIou_LTRB(objects[f].box, objects[length].box);
             if(iou > nms_threshold){
             	passNms = 0;
                 break;
@@ -225,8 +239,7 @@ int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], 
 
         if(detectNumOutputs == 9) {
         	// keypoints
-        	fix16_t* keyPtr = &keyMaps[mapNum][anchNum*4*pixels+ind];    // elements are every "pixels" elements  Might change between 4 and 10 unsure
-        	fix16_t stride_val = plates[platesLength].stride;
+        	fix16_t stride_val = mapStrides[mapNum];
         	int stride_y = 9;  //default max y for stride 32
             int stride_x = 32; //default max x for stride 32
             if (stride_val == 16){
@@ -238,23 +251,129 @@ int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], 
                 stride_x = 128;
             }
 
-            for(int p=0; p<8; p++){
+            for(int p=0; p<4; p++){
             	// assign keypoints based on stride x and y values per each stride, indexing is done based on stride_y and stride_x
                 // y and x values are the actual location in which the keypoint is found
-                plates[platesLength].keypoints[p] = fix16_mul(keyMaps[mapNum][p*stride_y*stride_x + y*stride_x + x] + fix16_from_int(x) + fix16_from_float(0.5), stride_val);
-                p++;
-                plates[platesLength].keypoints[p] = fix16_mul(keyMaps[mapNum][p*stride_y*stride_x + y*stride_x + x] + fix16_from_int(y) + fix16_from_float(0.5), stride_val);
+                objects[length].points[p][0] = fix16_mul(keyMaps[mapNum][(2*p+0)*stride_y*stride_x + y*stride_x + x] + fix16_from_int(x) + fix16_from_float(0.5), stride_val);
+                objects[length].points[p][1] = fix16_mul(keyMaps[mapNum][(2*p+1)*stride_y*stride_x + y*stride_x + x] + fix16_from_int(y) + fix16_from_float(0.5), stride_val);
             }
         } else {
-        	for(int p = 0; p < 8; p++) {
-        		plates[platesLength].keypoints[p] = kps[p];
+        	for(int p = 0; p < 4; p++) {
+        		objects[length].points[p][0]= kps[2*p+0];
+        		objects[length].points[p][1] = kps[2*p+1];
             }
         }
 
-        platesLength++;
-        if(platesLength>=max_plates)
+        length++;
+        if(length >= max_objects)
         	break;
     }
 
-    return platesLength;
+    return length;
+}
+
+static char CHARS[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+         'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K',
+         'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+         'W', 'X', 'Y', 'Z', 'I', 'O', '-'};
+#define CHAR_LENGTH 37
+//Global specifications
+#define PLATE_LENGTH 10
+#define RECOGNIZER_COLS 18
+#define MAX_PLATE_LETTERS 9
+#define MIN_PLATE_LETTERS 4
+
+
+void PlateDecodeIndicies(int* maxInd, char* label) {
+    char test[PLATE_LENGTH] = "";
+    int prev = -1;
+    for(int n = 0; n < RECOGNIZER_COLS; n++){
+        if ((maxInd[n]!= prev) && (maxInd[n] != (CHAR_LENGTH-1))){
+            strncat(test,&CHARS[maxInd[n]],1);
+        }
+        prev = maxInd[n];
+    }
+
+    strcpy(label, test);
+}
+
+fix16_t PlateDecodeCStyle(fix16_t* raw,  int output_length, char* label) {
+    fix16_t temp_outputs[output_length];
+    for (int i = 0; i < output_length; i++) {
+        temp_outputs[i] = raw[i];
+    }
+
+    fix16_t maxVal[RECOGNIZER_COLS];
+	int maxInd[RECOGNIZER_COLS] = {0};                 //index of max value for each col
+    fix16_t secVal[RECOGNIZER_COLS];
+    int secInd[RECOGNIZER_COLS] = {0};                 //index of second highest val for each col
+    int testInd[RECOGNIZER_COLS] = {0};
+    fix16_t minDiff = 0;
+    int minCol;
+
+    //set highest value and second highest val for each col to -1000
+    for (int c = 0; c < RECOGNIZER_COLS; c++) {
+    	maxVal[c] = fix16_nthous;
+    	secVal[c] = fix16_nthous;
+    }
+    for(int c = 0; c< RECOGNIZER_COLS; c++){           // stores the values and indexes of the highest and 2nd highest values
+        for(int r = 0; r < CHAR_LENGTH; r++){
+            if(temp_outputs[r*RECOGNIZER_COLS + c] > maxVal[c]){
+                secVal[c] = maxVal[c];
+                secInd[c] = maxInd[c];
+                maxVal[c] = temp_outputs[r*RECOGNIZER_COLS + c];
+                maxInd[c] = r;
+            }
+            else if(temp_outputs[r*RECOGNIZER_COLS + c] > secVal[c]){
+                secVal[c] = temp_outputs[r*RECOGNIZER_COLS + c];
+                secInd[c] = r;
+            }
+        }
+    }
+
+    PlateDecodeIndicies(maxInd, label);
+    if (strlen(label) > MAX_PLATE_LETTERS  || strlen(label) < MIN_PLATE_LETTERS) {
+    	return 0;
+    }
+
+    fix16_t diffVal[RECOGNIZER_COLS] = {0};
+    for(int c = 0; c < RECOGNIZER_COLS; c++){
+        diffVal[c] = maxVal[c] - secVal[c];
+    }
+
+    while(1) {
+    	char testLabel[PLATE_LENGTH] = "";
+
+        for(int i = 0; i < RECOGNIZER_COLS; i++)
+            testInd[i] = maxInd[i];
+
+        minDiff = diffVal[0];
+        minCol = 0;
+        for(int c = 1; c < RECOGNIZER_COLS; c++){
+            if (diffVal[c] < minDiff){
+                minDiff=diffVal[c];
+                minCol = c;
+            }
+        }
+        testInd[minCol] = secInd[minCol];
+        PlateDecodeIndicies(testInd, testLabel);
+        if (strcmp(testLabel, label)) {
+            return minDiff;
+        } else{
+            temp_outputs[secInd[minCol] * RECOGNIZER_COLS + minCol] = fix16_nthous;  //set to -1000
+            secVal[minCol] = fix16_nthous;
+            for (int r = 0; r < CHAR_LENGTH; r++){
+                if(r != maxInd[minCol]  && (temp_outputs[r*RECOGNIZER_COLS + minCol] > secVal[minCol])){
+                    secVal[minCol] = temp_outputs[r*RECOGNIZER_COLS + minCol];
+                    secInd[minCol] = r;
+                }
+            }
+            diffVal[minCol] = maxVal[minCol] - secVal[minCol];
+        }
+    }
+}
+
+fix16_t post_process_lpr(fix16_t *output, int output_length, char *label) {
+	fix16_t conf =  PlateDecodeCStyle(output, output_length, label);
+	return conf;
 }
