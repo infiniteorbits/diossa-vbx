@@ -3,9 +3,11 @@ set -e
 
 REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+OUTPUT_DIR="${REPO_ROOT_DIR}/output/onnxruntime-riscv64"
+
 docker run --rm -it \
   -v "${REPO_ROOT_DIR}/output/sysroot:/sysroot" \
-  -v "${REPO_ROOT_DIR}/output/onnxruntime-riscv64:/output" \
+  -v "${OUTPUT_DIR}:/output" \
   ort-riscv-builder bash -c '
     set -e
 
@@ -96,6 +98,13 @@ EOF
         ONNX_CUSTOM_PROTOC_EXECUTABLE=/opt/protoc/bin/protoc \
         FLATBUFFERS_FLATC_EXECUTABLE=$(which flatc) \
 
+    echo "===> Copying library to /output/"
     cp build/riscv64/Release/libonnxruntime.so* /output/
-    echo "===> Build complete! Library saved to /output/libonnxruntime.so*"
+
+    echo "===> Copying C/C++ API headers to /output/include/"
+    mkdir -p /output/include
+    cp -r /onnxruntime/include/onnxruntime/core/session/* /output/include/
+
+    echo "===> Build complete! Library saved to '${OUTPUT_DIR}'"
+
 '
