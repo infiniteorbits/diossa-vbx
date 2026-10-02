@@ -22,8 +22,12 @@ fi
 echo "===> Compiling ONNX Runtime for RISC-V..."
 bash "${REPO_ROOT_DIR}/third-party/onnxruntime/xcompile_onnxruntime_without_python.sh"
 
+echo "===> Patching ONNX Runtime library for RISC-V..."
+bash "${REPO_ROOT_DIR}/third-party/onnxruntime/patch_libraries.sh"
+
 echo "===> Transferring onnxruntime-riscv64 library and headers to device..."
 rsync -avzP \
     -e "ssh -p $DEVICE_PORT" \
-    "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/" \
+    "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/include" \
+    "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/lib" \
     "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_ONNXRUNTIME_PATH}"
