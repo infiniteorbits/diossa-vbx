@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 DEVICE_IP="${DEVICE_IP:-192.168.20.6}"
+DEVICE_PORT="${DEVICE_PORT:-22}"
 DEVICE_USERNAME="${DEVICE_USERNAME:-root}"
 SYSROOT="${REPO_ROOT_DIR}/output/sysroot"
 
@@ -19,5 +20,6 @@ rsync -aH --numeric-ids --info=progress2 \
   --include='/usr/lib/***' \
   --include='/usr/lib64/***' \
   --exclude='*' \
+  -e "ssh -p $DEVICE_PORT" \
   "${DEVICE_USERNAME}@${DEVICE_IP}:/" \
   "${SYSROOT}/"

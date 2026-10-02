@@ -3,6 +3,7 @@
 set -euo pipefail
 
 DEVICE_IP="${DEVICE_IP:-192.168.20.6}"
+DEVICE_PORT="${DEVICE_PORT:-22}"
 DEVICE_USERNAME="${DEVICE_USERNAME:-root}"
 DEVICE_ONNXRUNTIME_PATH="${DEVICE_ONNXRUNTIME_PATH:-/root/vbx-sdk/onnxruntime-riscv64}"
 
@@ -22,4 +23,7 @@ echo "===> Compiling ONNX Runtime for RISC-V..."
 bash "${REPO_ROOT_DIR}/third-party/onnxruntime/xcompile_onnxruntime_without_python.sh"
 
 echo "===> Transferring onnxruntime-riscv64 library and headers to device..."
-rsync -avz "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/" "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_ONNXRUNTIME_PATH}"
+rsync -avzP \
+    -e "ssh -p $DEVICE_PORT" \
+    "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/" \
+    "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_ONNXRUNTIME_PATH}"
