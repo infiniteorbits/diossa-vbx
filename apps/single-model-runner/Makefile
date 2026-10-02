@@ -7,7 +7,7 @@ CC ?= gcc
 CXX ?= g++
 
 # ONNX Runtime install produced for this board (headers + libonnxruntime.so).
-ORT_DIR ?= ../../ort/output
+ORT_DIR ?= ../../onnxruntime-riscv64
 
 # Select target hardware
 kit = videokit
@@ -51,9 +51,9 @@ $(CXX_OBJS): obj/%.o: %
 	$(CXX) $(CXX_FLAGS) -c $< -o $@
 
 run-model: $(CXX_OBJS) $(C_OBJS)
-	$(CXX) -o $@ $^ -ljpeg -L$(ORT_DIR) -lonnxruntime \
+	$(CXX) -o $@ $^ -ljpeg -L$(ORT_DIR) -lonnxruntime
 		-Wl,-rpath,'$$ORIGIN' \
-		-Wl,-rpath,'$$ORIGIN/../../ort/output'
+		-Wl,-rpath,'$$ORIGIN${ORT_DIR}'
 
 # Copy the runtime next to the binary so $$ORIGIN finds libonnxruntime.so.1 on the board.
 .PHONY: stage
