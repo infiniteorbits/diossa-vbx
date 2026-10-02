@@ -15,7 +15,7 @@ function transfer_sdk_to_device() {
     rsync -avzP \
         -e "ssh -p $DEVICE_PORT" \
         "${sdk_path}/drivers" \
-        "${sdk_path}/example" \
+        "${sdk_path}/apps" \
         "${sdk_path}/lib" \
         "$DEVICE_USERNAME@$DEVICE_IP:$device_path"
 }
