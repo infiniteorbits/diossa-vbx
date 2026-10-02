@@ -6,17 +6,19 @@
 CC ?= gcc
 CXX ?= g++
 
-# ONNX Runtime install produced for this board (headers + libonnxruntime.so).
+# ONNX Runtime SDK directory on the board
 ORT_DIR ?= ../../onnxruntime-riscv64
+ORT_LIB_DIR = $(ORT_DIR)/lib
+ORT_INC_DIR = $(ORT_DIR)/include
 
 # Select target hardware
 kit = videokit
 ifeq ($(kit),discovery)
-	C_FLAGS += -DUSE_INTERRUPTS=0 -DMSS_DDR
+    C_FLAGS += -DUSE_INTERRUPTS=0 -DMSS_DDR
 else ifeq ($(kit),icicle)
-	C_FLAGS += -DUSE_INTERRUPTS=0 -DMSS_DDR -DPDMA
+    C_FLAGS += -DUSE_INTERRUPTS=0 -DMSS_DDR -DPDMA
 else
-	C_FLAGS += -DUSE_INTERRUPTS=1 -DPDMA
+    C_FLAGS += -DUSE_INTERRUPTS=1 -DPDMA
 endif
 
 all: run-model
@@ -40,7 +42,7 @@ C_OBJS = $(addsuffix .o,$(addprefix obj/,$(abspath $(C_SRCS))))
 CXX_OBJS = $(addsuffix .o,$(addprefix obj/,$(abspath $(CXX_SRCS))))
 
 C_FLAGS += -Wall -O3 -I../../drivers/vectorblox/ -Ipdma/ -MD -DVBX_SOC_DRIVER
-CXX_FLAGS = $(C_FLAGS) -std=c++17 -I$(ORT_DIR)/include
+CXX_FLAGS = $(C_FLAGS) -std=c++17 -I$(ORT_INC_DIR)
 
 $(C_OBJS): obj/%.o: %
 	mkdir -p $(dir $@)
@@ -51,14 +53,16 @@ $(CXX_OBJS): obj/%.o: %
 	$(CXX) $(CXX_FLAGS) -c $< -o $@
 
 run-model: $(CXX_OBJS) $(C_OBJS)
-	$(CXX) -o $@ $^ -ljpeg -L$(ORT_DIR) -lonnxruntime
+	$(CXX) -o $@ $^ -ljpeg \
+		-L$(ORT_LIB_DIR) -lonnxruntime \
+		-Wl,-rpath-link,$(ORT_LIB_DIR) \
 		-Wl,-rpath,'$$ORIGIN' \
-		-Wl,-rpath,'$$ORIGIN${ORT_DIR}'
+		-Wl,-rpath,'$$ORIGIN/$(ORT_LIB_DIR)'
 
-# Copy the runtime next to the binary so $$ORIGIN finds libonnxruntime.so.1 on the board.
+# Copy all runtime libraries next to the binary so $$ORIGIN finds them at execution time.
 .PHONY: stage
 stage: run-model
-	cp -a $(ORT_DIR)/libonnxruntime.so.1 .
+	cp -a $(ORT_LIB_DIR)/*.so* .
 
 .PHONY: overlay
 overlay:
@@ -67,4 +71,4 @@ overlay:
 
 .PHONY: clean
 clean:
-	rm -rf run-model libonnxruntime.so.1 */*.dtbo *.o */*.o *.a obj
+	rm -rf run-model libonnxruntime.so* libstdc++.so* libatomic.so* */*.dtbo *.o */*.o *.a obj
