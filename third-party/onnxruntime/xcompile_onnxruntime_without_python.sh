@@ -3,13 +3,18 @@ set -e
 
 REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-OUTPUT_DIR="${REPO_ROOT_DIR}/output/onnxruntime-riscv64"
+SYSROOT_DIR="$REPO_ROOT_DIR/output/sysroot"
+OUTPUT_DIR="$REPO_ROOT_DIR/output/onnxruntime-riscv64"
+
+mkdir -p "$OUTPUT_DIR/raw"
 
 docker run --rm -it \
-  -v "${REPO_ROOT_DIR}/output/sysroot:/sysroot" \
-  -v "${OUTPUT_DIR}:/output" \
+  -v "$SYSROOT_DIR:/sysroot" \
+  -v "$OUTPUT_DIR:/output" \
   ort-riscv-builder bash -c '
     set -e
+
+    PYTHON_BIN="/opt/venv/bin/python"
 
     # Remove all sysroot Protobuf headers to prevent include collisions
     rm -rf /sysroot/usr/include/google/protobuf
@@ -71,8 +76,8 @@ EOF
     # Wipe prior build directory inside container for a clean build
     rm -rf build/riscv64
 
-    echo "===> Running ONNX Runtime RISC-V Build..."
-    python3 tools/ci_build/build.py \
+    echo "===> Running ONNX Runtime C/C++ Library Build..."
+    $PYTHON_BIN tools/ci_build/build.py \
       --allow_running_as_root \
       --config Release \
       --build_dir build/riscv64 \
@@ -94,17 +99,13 @@ EOF
         CMAKE_C_STANDARD_LIBRARIES="-latomic" \
         CMAKE_CXX_STANDARD_LIBRARIES="-latomic" \
         CMAKE_SYSROOT=/sysroot \
-        CMAKE_FIND_ROOT_PATH="/sysroot;$NUMPY_INCLUDE_DIR" \
+        CMAKE_FIND_ROOT_PATH="/sysroot" \
         ONNX_CUSTOM_PROTOC_EXECUTABLE=/opt/protoc/bin/protoc \
-        FLATBUFFERS_FLATC_EXECUTABLE=$(which flatc) \
+        FLATBUFFERS_FLATC_EXECUTABLE=$(which flatc)
 
-    echo "===> Copying library to /output/"
-    cp build/riscv64/Release/libonnxruntime.so* /output/
+    echo "===> Copying raw shared library to /output/raw/"
+    rm -rf /output/raw/*
+    cp -d build/riscv64/Release/libonnxruntime.so* /output/raw/
 
-    echo "===> Copying C/C++ API headers to /output/include/"
-    mkdir -p /output/include
-    cp -r /onnxruntime/include/onnxruntime/core/session/* /output/include/
-
-    echo "===> Build complete! Library saved to '${OUTPUT_DIR}'"
-
+    echo "===> Shared library build complete! Saved to $OUTPUT_DIR/raw/"
 '
