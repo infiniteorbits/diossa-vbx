@@ -5,7 +5,7 @@ set -euo pipefail
 DEVICE_IP="${DEVICE_IP:-192.168.20.6}"
 DEVICE_PORT="${DEVICE_PORT:-22}"
 DEVICE_USERNAME="${DEVICE_USERNAME:-root}"
-DEVICE_ONNXRUNTIME_PATH="${DEVICE_ONNXRUNTIME_PATH:-/root/vbx-sdk/onnxruntime-riscv64}"
+DEVICE_SDK_PATH="${DEVICE_SDK_PATH:-/root/vbx-sdk}"
 
 REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -30,4 +30,4 @@ rsync -avzP \
     -e "ssh -p $DEVICE_PORT" \
     "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/include" \
     "${REPO_ROOT_DIR}/output/onnxruntime-riscv64/lib" \
-    "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_ONNXRUNTIME_PATH}"
+    "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_SDK_PATH}/onnxruntime-riscv64"
