@@ -1,0 +1,16 @@
+/.vscode/
+__pycache__
+*.pth
+*.onnx
+/quantize_result/
+/savedmodel/
+*.keras
+*.h5
+*.tflite
+/dump_results/
+/compiled/
+/.vai_qat/
+*/dist/
+*/*.egg-info/
+*/build/
+/.cache/
