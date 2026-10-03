@@ -1,0 +1,210 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+.vars-pytorch:
+  variables:
+    SRC_DIR: src_pytorch
+    TST_DIR: tests/pytorch
+
+.vars-tensorflow-keras:
+  variables:
+    SRC_DIR: src_tensorflow_keras
+    TST_DIR: tests/tensorflow_keras
+
+.tags-gpu-gitlab:
+  tags:
+    - saas-linux-medium-amd64-gpu-standard
+
+.tags-gpu-optimus:
+  tags:
+    - optimus
+    - gpu
+
+.base-test:
+  stage: test
+  interruptible: true
+  before_script:
+    - lscpu
+    - free -h
+    - df -h
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        paths:
+          - $SRC_DIR/**/*
+          - $TST_DIR/**/*
+        compare_to: 'main'
+    - if: $CI_COMMIT_TAG
+    - when: manual
+
+.install-cuda-pytorch: &install-cuda-pytorch
+  - apt update && apt install -y wget
+  - wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+  - dpkg -i cuda-keyring_1.1-1_all.deb
+  - apt update && apt install -y cuda-runtime-12-6
+
+.install-cuda-tensorflow: &install-cuda-tensorflow
+  - wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+  - dpkg -i cuda-keyring_1.1-1_all.deb
+  - apt update && apt install -y cuda-runtime-12-5 cudnn9-cuda-12 cuda-compiler-12-5
+
+.verify-gpu-pytorch: &verify-gpu-pytorch
+  - python -c "import torch; assert torch.cuda.is_available()"
+
+.verify-gpu-tensorflow: &verify-gpu-tensorflow
+  - python -c "import tensorflow as tf; assert len(tf.config.list_physical_devices('GPU')) > 0"
+
+.verify-gpu-onnxruntime: &verify-gpu-onnxruntime
+  - python -c "import onnxruntime as ort; assert 'CUDAExecutionProvider' in ort.get_available_providers()"
+
+test-pytorch:
+  extends:
+    - .vars-pytorch
+    - .base-test
+    - .tags-gpu-gitlab
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/pytorch/pytorch:2.12.0-cuda12.6-cudnn9-runtime
+  script:
+    - *install-cuda-pytorch
+    - *verify-gpu-pytorch
+    # newer PyTorch versions miss onnxscript, required for ONNX export
+    - pip install --break-system-packages ./$SRC_DIR[dev] onnxscript "onnxruntime-gpu<1.27"
+    # onnxruntime-gpu version capped due to CUDA version compatibility
+    - *verify-gpu-onnxruntime
+    # the environment test must run first
+    - pytest -v -ra
+      $CI_PROJECT_DIR/$TST_DIR/env/test_environment.py
+    - pytest -v -ra
+      --junit-xml=pytorch-junit.xml
+      --cov-report term --cov-report xml:pytorch-cobertura.xml
+      --cov=nn_models.pytorch
+      $CI_PROJECT_DIR/$TST_DIR/base
+  cache:
+    paths:
+      - .cache
+  artifacts:
+    reports:
+      junit: pytorch-junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: pytorch-cobertura.xml
+    when: always
+  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
+
+test-pytorch-vitisai:
+  extends:
+    - .vars-pytorch
+    - .base-test
+    - .tags-gpu-optimus
+  image:
+    name: localhost/vitis-ai:3.5
+    pull_policy: never
+  script:
+    - source $(conda info --base)/etc/profile.d/conda.sh
+    - conda activate vai35
+    - *verify-gpu-pytorch
+    - *verify-gpu-onnxruntime
+    - pip install ./$SRC_DIR --no-deps
+    # the environment test must run first
+    - pytest -v -ra
+      $CI_PROJECT_DIR/$TST_DIR/env/test_environment.py
+    - pytest -v -ra
+      --junit-xml=pytorch-base-vitisai-junit.xml
+      $CI_PROJECT_DIR/$TST_DIR/base
+    - pytest -v -ra
+      --junit-xml=pytorch-vitisai-junit.xml
+      $CI_PROJECT_DIR/$TST_DIR/vitisai
+  artifacts:
+    reports:
+      junit:
+        - pytorch-base-vitisai-junit.xml
+        - pytorch-vitisai-junit.xml
+    when: always
+
+test-tensorflow-keras:
+  extends:
+    - .vars-tensorflow-keras
+    - .base-test
+    - .tags-gpu-gitlab
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/tensorflow/tensorflow:2.21.0-gpu
+  script:
+    - *install-cuda-tensorflow
+    - *verify-gpu-tensorflow
+    - pip install ./$SRC_DIR[dev] "onnxruntime-gpu<1.27"
+    # onnxruntime-gpu version capped due to CUDA version compatibility
+    - *verify-gpu-onnxruntime
+    - export TF_GPU_ALLOCATOR=cuda_malloc_async
+    - pytest -v -ra
+      --junit-xml=tensorflow_keras-junit.xml
+      --cov-report term --cov-report xml:tensorflow_keras-cobertura.xml
+      --cov=nn_models.tensorflow_keras
+      $CI_PROJECT_DIR/$TST_DIR/base
+  artifacts:
+    reports:
+      junit: tensorflow_keras-junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: tensorflow_keras-cobertura.xml
+    when: always
+  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
+
+test-tensorflow-keras-vitisai:
+  extends:
+    - .vars-tensorflow-keras
+    - .base-test
+    - .tags-gpu-optimus
+  image:
+    name: localhost/vitis-ai:3.5
+    pull_policy: never
+  script:
+    - source $(conda info --base)/etc/profile.d/conda.sh
+    - conda activate vai35
+    - export TF_GPU_ALLOCATOR=cuda_malloc_async
+    - *verify-gpu-tensorflow
+    - *verify-gpu-onnxruntime
+    - pip install ./$SRC_DIR --no-deps
+    - pytest -v -ra
+      --junit-xml=tensorflow_keras-base-vitisai-junit.xml
+      $CI_PROJECT_DIR/$TST_DIR/base
+    - pytest -v -ra --forked
+      --junit-xml=tensorflow_keras-vitisai-junit.xml
+      $CI_PROJECT_DIR/$TST_DIR/vitisai
+  artifacts:
+    reports:
+      junit:
+        - tensorflow_keras-base-vitisai-junit.xml
+        - tensorflow_keras-vitisai-junit.xml
+    when: always
+
+.base-deploy:
+  stage: deploy
+  image: python:3.12
+  script:
+    - pip install build twine
+    - python -m build ./$SRC_DIR
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=gitlab-ci-token
+      python -m twine upload --verbose
+      --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi
+      $SRC_DIR/dist/*
+  rules:
+    - if: $CI_COMMIT_TAG
+
+deploy-pytorch:
+  extends:
+    - .vars-pytorch
+    - .base-deploy
+  needs:
+    - "test-pytorch"
+    - "test-pytorch-vitisai"
+
+deploy-tensorflow-keras:
+  extends:
+    - .vars-tensorflow-keras
+    - .base-deploy
+  needs:
+    - "test-tensorflow-keras"
+    - "test-tensorflow-keras-vitisai"
