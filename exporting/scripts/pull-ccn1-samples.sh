@@ -11,7 +11,7 @@ fi
 source $REPO_ROOT_DIR/exporting/.venv/bin/activate
 
 python \
-    -m diossa-model-exporter.pull-dataset-sample \
+    -m diossa_model_exporter.pull-dataset-sample \
     --output-dir $REPO_ROOT_DIR/output/images/ccn1-kr-224x224-test-sample/ \
     --dataset-name Inmarsat-5_DIOSSA-CCN_Pangu_v4 \
     --dataset-path DIOSSA_CCN1 \
@@ -25,7 +25,7 @@ python \
 
 
 python \
-    -m diossa-model-exporter.pull-dataset-sample \
+    -m diossa_model_exporter.pull-dataset-sample \
     --output-dir $REPO_ROOT_DIR/output/images/ccn1-od-384x288-test-sample/ \
     --dataset-name Inmarsat-5_DIOSSA-CCN_Pangu_v4 \
     --dataset-path DIOSSA_CCN1 \
