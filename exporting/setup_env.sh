@@ -32,5 +32,6 @@ fi
 source $VENV_DIR/bin/activate
 
 uv pip install -e $REPO_ROOT_DIR/exporting/.
+deactivate
 
 echo "===> Model exporting environment setup complete."
