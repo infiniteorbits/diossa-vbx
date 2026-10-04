@@ -2,12 +2,36 @@
 
 set -euo pipefail
 
-MODEL_CKPT="${MODEL_CKPT:-data/models/mobilepose/ccn1--blest-harl-epoch138.ckpt}"
-MODEL_INPUT_BCHW_SHAPE="${MODEL_INPUT_BCHW_SHAPE:-1 3 224 224}"
-MODEL_CLASS="${MODEL_CLASS:-nn_models.pytorch.keypoints_regression.mobilepose.MobilePose}"
-MODEL_CLASS_POSTPROCESSING="${MODEL_CLASS_POSTPROCESSING:-nn_models.pytorch.keypoints_regression.mobilepose.MobilePose_Edge}"
+# Exit if any required params are not set
+if [ -z "${MODEL_CKPT:-}" ]; then
+    echo "Error: MODEL_CKPT environment variable must be set." >&2
+    exit 1
+fi
+if [ -z "${MODEL_INPUT_BCHW_SHAPE:-}" ]; then
+    echo "Error: MODEL_INPUT_BCHW_SHAPE environment variable must be set." >&2
+    exit 1
+fi
+if [ -z "${MODEL_CLASS:-}" ]; then
+    echo "Error: MODEL_CLASS environment variable must be set." >&2
+    exit 1
+fi
 
-CALIBRATION_IMAGES_DIR="${CALIBRATION_IMAGES_DIR:-data/images/pco-vis-test-sample/}"
+
+if [ -z "${MODEL_CLASS_POSTPROCESSING:-}" ]; then
+    echo "Error: MODEL_CLASS_POSTPROCESSING environment variable must be set." >&2
+    exit 1
+fi
+
+if [ -z "${CALIBRATION_IMAGES_DIR:-}" ]; then
+    echo "Error: CALIBRATION_IMAGES_DIR environment variable must be set." >&2
+    exit 1
+fi
+
+MODEL_KWARGS="${MODEL_KWARGS:-}"
+
+MODEL_BACKBONE_OUTPUT_LAYER_NAMES="${MODEL_BACKBONE_OUTPUT_LAYER_NAMES:-}"
+MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES="${MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES:-}"
+
 
 EXPORTED_MODEL_OUTPUT_DIR=$(basename ${MODEL_CKPT/.ckpt/})
 OUTPUT_DIR="${OUTPUT_DIR:-output/embedded-models/${EXPORTED_MODEL_OUTPUT_DIR}/}"
@@ -29,34 +53,46 @@ fi
 source $REPO_ROOT_DIR/exporting/.venv/bin/activate
 
 MODEL_ONNX="${MODEL_ONNX:-${REPO_ROOT_DIR}/${OUTPUT_DIR}${EXPORTED_MODEL_OUTPUT_DIR}.onnx}"
-
-if [ ! -f ${MODEL_ONNX} ]; then
-    echo "===> Exporting mobilepose PyTorch model edge part to ONNX ${MODEL_ONNX}..."
-    python -m diossa-model-exporter.export_pytorch_to_onnx \
-        --ckpt ${REPO_ROOT_DIR}/${MODEL_CKPT} \
-        --onnx ${MODEL_ONNX} \
-        --input-shape ${MODEL_INPUT_BCHW_SHAPE} \
-        --model-class ${MODEL_CLASS} \
-        --input-names input \
-        --output-names unnormalized_heatmaps
-    echo "===> Mobilepose model edge part exported to ONNX."
-else
-    echo "===> Mobilepose model edge part already exported to ONNX ${MODEL_ONNX}."
-fi
-
 MODEL_ONNX_POSTPROCESSING="${MODEL_ONNX_POSTPROCESSING:-${REPO_ROOT_DIR}/${OUTPUT_DIR}${EXPORTED_MODEL_OUTPUT_DIR}_postprocessing.onnx}"
 
-if [ ! -f ${MODEL_ONNX_POSTPROCESSING} ]; then
-    echo "===> Exporting mobilepose PyTorch model postprocessing part to ONNX ${MODEL_ONNX_POSTPROCESSING}..."
-    python -m diossa-model-exporter.export_pytorch_to_onnx \
-        --onnx ${MODEL_ONNX_POSTPROCESSING} \
-        --input-shape ${MODEL_INPUT_BCHW_SHAPE} \
-        --model-class ${MODEL_CLASS_POSTPROCESSING} \
-        --input-names input \
-        --output-names unnormalized_heatmaps
-    echo "===> Mobilepose model postprocessing part exported to ONNX."
+NEED_POSTPROCESSING=0
+if [ -n "${MODEL_CLASS_POSTPROCESSING}" ] && [ ! -f "${MODEL_ONNX_POSTPROCESSING}" ]; then
+    NEED_POSTPROCESSING=1
+fi
+
+if [ ! -f "${MODEL_ONNX}" ] || [ "${NEED_POSTPROCESSING}" -eq 1 ]; then
+    echo "===> Exporting PyTorch model to ONNX ${MODEL_ONNX}..."
+    EXPORT_CMD=(
+        python -m diossa-model-exporter.export_pytorch_to_onnx
+        --ckpt "${REPO_ROOT_DIR}/${MODEL_CKPT}"
+        --onnx "${MODEL_ONNX}"
+        --input-shape ${MODEL_INPUT_BCHW_SHAPE}
+        --model-class "${MODEL_CLASS}"
+        --input-names input
+    )
+    if [ -n "${MODEL_KWARGS}" ]; then
+        # shellcheck disable=SC2206
+        EXPORT_CMD+=(--model-kwargs ${MODEL_KWARGS})
+    fi
+    if [ -n "${MODEL_BACKBONE_OUTPUT_LAYER_NAMES}" ]; then
+        # shellcheck disable=SC2206
+        EXPORT_CMD+=(--output-names ${MODEL_BACKBONE_OUTPUT_LAYER_NAMES})
+    fi
+    if [ -n "${MODEL_CLASS_POSTPROCESSING}" ]; then
+        EXPORT_CMD+=(
+            --postprocessing-model-class "${MODEL_CLASS_POSTPROCESSING}"
+            --postprocessing-onnx "${MODEL_ONNX_POSTPROCESSING}"
+        )
+        if [ -n "${MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES}" ]; then
+            # shellcheck disable=SC2206
+            EXPORT_CMD+=(--postprocessing-output-names ${MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES})
+        fi
+    fi
+    echo ${EXPORT_CMD[@]}
+    "${EXPORT_CMD[@]}"
+    echo "===> PyTorch model exported to ONNX."
 else
-    echo "===> Mobilepose model postprocessing part already exported to ONNX ${MODEL_ONNX_POSTPROCESSING}."
+    echo "===> PyTorch model already exported to ONNX ${MODEL_ONNX}."
 fi
 
 echo "===> Activating VectorBlox SDK environment..."
@@ -85,7 +121,7 @@ if [ ! -f $CALIBRATION_NUMPY_ARRAY ]; then
     generate_npy \
         ${REPO_ROOT_DIR}/${CALIBRATION_IMAGES_DIR} \
         -o $CALIBRATION_NUMPY_ARRAY \
-        -s $MODEL_INPUT_WIDTH $MODEL_INPUT_HEIGHT --norm 
+        -s $MODEL_INPUT_HEIGHT $MODEL_INPUT_WIDTH --norm 
 else
     echo "===> Numpy calibration data file already generated at ${CALIBRATION_NUMPY_ARRAY}."
 fi
@@ -103,10 +139,9 @@ if [ ! -f $MODEL_TFLITE ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
 
-    ls -la $CALIBRATION_NUMPY_ARRAY
     onnx2tf \
         -cind images $CALIBRATION_NUMPY_ARRAY [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
-        -ois images:1,3,${MODEL_INPUT_WIDTH},${MODEL_INPUT_HEIGHT} \
+        -ois images:1,3,${MODEL_INPUT_HEIGHT},${MODEL_INPUT_WIDTH} \
         -i ${MODEL_ONNX} \
         --output_signaturedefs \
         --output_integer_quantized_tflite
