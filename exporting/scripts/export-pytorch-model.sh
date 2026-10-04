@@ -27,9 +27,18 @@ if [ -z "${CALIBRATION_IMAGES_DIR:-}" ]; then
     exit 1
 fi
 
+if [ -z "${NORMALIZATION_MEAN_FLOAT32:-}" ]; then
+    echo "Error: NORMALIZATION_MEAN_FLOAT32 environment variable must be set." >&2
+    exit 1
+fi
+if [ -z "${NORMALIZATION_STD_FLOAT32:-}" ]; then
+    echo "Error: NORMALIZATION_STD_FLOAT32 environment variable must be set." >&2
+    exit 1
+fi
+
 MODEL_KWARGS="${MODEL_KWARGS:-}"
 
-MODEL_BACKBONE_OUTPUT_LAYER_NAMES="${MODEL_BACKBONE_OUTPUT_LAYER_NAMES:-}"
+MODEL_BACKBONE_OUTPUT_LAYER_NAMES="${MODEL_BACKBONE_OUTPUT_LAYER_NAMES:-}"c
 MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES="${MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES:-}"
 
 
@@ -107,6 +116,7 @@ if [ ! -f $CALIBRATION_NUMPY_ARRAY ]; then
     python -m diossa_model_exporter.make_calibration_sample \
         ${REPO_ROOT_DIR}/${CALIBRATION_IMAGES_DIR} \
         -o $CALIBRATION_NUMPY_ARRAY \
+        --count 100 \
         -s $MODEL_INPUT_HEIGHT $MODEL_INPUT_WIDTH --norm
 else
     echo "===> Numpy calibration data file already generated at ${CALIBRATION_NUMPY_ARRAY}."
@@ -144,10 +154,8 @@ if [ ! -f $MODEL_TFLITE ]; then
     onnxsim ${MODEL_ONNX} ${MODEL_ONNX_SIM}
     mv ${MODEL_ONNX_SIM} ${MODEL_ONNX}
 
-    # [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]]
-
     onnx2tf \
-        -cind images $CALIBRATION_NUMPY_ARRAY [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
+        -cind images $CALIBRATION_NUMPY_ARRAY [[[${NORMALIZATION_MEAN_FLOAT32}]]] [[[${NORMALIZATION_STD_FLOAT32}]]] \
         -ois images:1,3,${MODEL_INPUT_HEIGHT},${MODEL_INPUT_WIDTH} \
         -i ${MODEL_ONNX} \
         --output_signaturedefs \
@@ -164,8 +172,12 @@ MODEL_PREPROCESSED_TFLITE="${MODEL_PREPROCESSED_TFLITE:-${REPO_ROOT_DIR}/${OUTPU
 
 if [ ! -f $MODEL_PREPROCESSED_TFLITE ]; then
     echo "===> Preprocessing Model TFLite..."
-    # -mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
-    tflite_preprocess $MODEL_TFLITE  --mean 127.5 127.5 127.5 --scale 127.5 127.5 127.5
+
+    # Assume NORMALIZATION_MEAN_FLOAT32 is a space-separated tuple, e.g. "0.485 0.456 0.406"
+    NORMALIZATION_MEAN_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_MEAN_FLOAT32}'.split()]))")
+    NORMALIZATION_STD_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_STD_FLOAT32}'.split()]))")
+
+    tflite_preprocess $MODEL_TFLITE  --mean ${NORMALIZATION_MEAN_AS_INT8_DECIMAL} --scale ${NORMALIZATION_STD_AS_INT8_DECIMAL}
     echo "===> Model TFLite preprocessed."
 else
     echo "===> Model TFLite already preprocessed at ${MODEL_PREPROCESSED_TFLITE}."
@@ -182,6 +194,14 @@ if [ ! -f $MODEL_VNNX ]; then
     echo "===> VNNX generated at ${MODEL_VNNX}."
 else
     echo "===> VNNX already generated at ${MODEL_VNNX}."
+fi
+
+
+if [ -f ${MODEL_VNNX} ]; then
+    echo "Running Simulation..."
+    #python $VBX_SDK/example/python/ssdv2.py fcos_V1000_ncomp.vnnx images/PCO_VIS_EUTELSAT_v4_CCN2_val_sample_13_image.png --torch 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model fcos_V1000_ncomp.vnnx images/PCO_VIS_EUTELSAT_v4_CCN2_val_sample_13_image.png'
 fi
 
 echo "===> Deactivating VectorBlox SDK environment..."
