@@ -5,9 +5,13 @@ set -euo pipefail
 REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 (
-    export MODEL_CKPT="data/models/fcos/ccn1--licit-weal-epoch75.ckpt"
+    # export MODEL_CKPT="data/models/fcos/ccn1--licit-weal-epoch75.ckpt"
+    # export MODEL_CLASS="nn_models.pytorch.object_detection.fcos.FCOS"
+
+    export MODEL_CKPT="data/models/fcos/ccn1--quare-delf-epoch19.ckpt"
+    export MODEL_CLASS="diossa_model_exporter.patched_models.fcos.FCOS_PTQ"
+
     export MODEL_INPUT_BCHW_SHAPE="1 3 288 384"
-    export MODEL_CLASS="nn_models.pytorch.object_detection.fcos.FCOS"
     export MODEL_CLASS_POSTPROCESSING="nn_models.pytorch.object_detection.fcos.FCOS_Edge"
     export MODEL_KWARGS="img_size=[384,288]"
 

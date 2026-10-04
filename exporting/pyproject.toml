@@ -1,5 +1,5 @@
 [project]
-name = "diossa-model-exporter"
+name = "diossa_model_exporter"
 requires-python = ">=3.8"
 dynamic = ["version"]
 

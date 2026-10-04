@@ -10,11 +10,11 @@ fi
 echo "===> Activating virtual environment..."
 source $REPO_ROOT_DIR/exporting/.venv/bin/activate
 
-# echo "===> Pulling CCN1 samples..."
-# bash $REPO_ROOT_DIR/exporting/scripts/pull-ccn1-samples.sh
+echo "===> Pulling CCN1 samples..."
+bash $REPO_ROOT_DIR/exporting/scripts/pull-ccn1-samples.sh
 
-#echo "===> Exporting Mobilepose model..."
-#bash $REPO_ROOT_DIR/exporting/scripts/export-mobilepose.sh
+echo "===> Exporting Mobilepose model..."
+bash $REPO_ROOT_DIR/exporting/scripts/export-mobilepose.sh
 
 echo "===> Exporting FCOS model..."
 bash $REPO_ROOT_DIR/exporting/scripts/export-fcos.sh

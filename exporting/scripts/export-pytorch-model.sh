@@ -63,7 +63,7 @@ fi
 if [ ! -f "${MODEL_ONNX}" ] || [ "${NEED_POSTPROCESSING}" -eq 1 ]; then
     echo "===> Exporting PyTorch model to ONNX ${MODEL_ONNX}..."
     EXPORT_CMD=(
-        python -m diossa-model-exporter.export_pytorch_to_onnx
+        python -m diossa_model_exporter.export_pytorch_to_onnx
         --ckpt "${REPO_ROOT_DIR}/${MODEL_CKPT}"
         --onnx "${MODEL_ONNX}"
         --input-shape ${MODEL_INPUT_BCHW_SHAPE}
@@ -95,6 +95,23 @@ else
     echo "===> PyTorch model already exported to ONNX ${MODEL_ONNX}."
 fi
 
+echo "Checking for Numpy calibration data file..."
+
+CALIBRATION_NUMPY_ARRAY=${REPO_ROOT_DIR}/${OUTPUT_DIR}/${EXPORTED_MODEL_OUTPUT_DIR}_calibration.npy
+
+MODEL_INPUT_HEIGHT=$(echo $MODEL_INPUT_BCHW_SHAPE | cut -d' ' -f3)
+MODEL_INPUT_WIDTH=$(echo $MODEL_INPUT_BCHW_SHAPE | cut -d' ' -f4)
+
+if [ ! -f $CALIBRATION_NUMPY_ARRAY ]; then
+    echo "Generating Numpy calibration data file with height ${MODEL_INPUT_HEIGHT} and width ${MODEL_INPUT_WIDTH}..."
+    python -m diossa_model_exporter.make_calibration_sample \
+        ${REPO_ROOT_DIR}/${CALIBRATION_IMAGES_DIR} \
+        -o $CALIBRATION_NUMPY_ARRAY \
+        -s $MODEL_INPUT_HEIGHT $MODEL_INPUT_WIDTH --norm
+else
+    echo "===> Numpy calibration data file already generated at ${CALIBRATION_NUMPY_ARRAY}."
+fi
+
 echo "===> Activating VectorBlox SDK environment..."
 source $REPO_ROOT_DIR/third-party/vbx-sdk/setup_vars.sh
 
@@ -108,24 +125,6 @@ sor4onnx \
     --output_onnx_file_path ${MODEL_ONNX}
 
 
-
-echo "Checking for Numpy calibration data file..."
-
-CALIBRATION_NUMPY_ARRAY=${REPO_ROOT_DIR}/${OUTPUT_DIR}/${EXPORTED_MODEL_OUTPUT_DIR}_calibration.npy
-
-MODEL_INPUT_HEIGHT=$(echo $MODEL_INPUT_BCHW_SHAPE | cut -d' ' -f3)
-MODEL_INPUT_WIDTH=$(echo $MODEL_INPUT_BCHW_SHAPE | cut -d' ' -f4)
-
-if [ ! -f $CALIBRATION_NUMPY_ARRAY ]; then
-    echo "Generating Numpy calibration data file with height ${MODEL_INPUT_HEIGHT} and width ${MODEL_INPUT_WIDTH}..."
-    generate_npy \
-        ${REPO_ROOT_DIR}/${CALIBRATION_IMAGES_DIR} \
-        -o $CALIBRATION_NUMPY_ARRAY \
-        -s $MODEL_INPUT_HEIGHT $MODEL_INPUT_WIDTH --norm 
-else
-    echo "===> Numpy calibration data file already generated at ${CALIBRATION_NUMPY_ARRAY}."
-fi
-
 MODEL_TFLITE="${MODEL_TFLITE:-${REPO_ROOT_DIR}/${OUTPUT_DIR}${EXPORTED_MODEL_OUTPUT_DIR}.tflite}"
 
 if [ ! -f $MODEL_TFLITE ]; then
@@ -138,6 +137,14 @@ if [ ! -f $MODEL_TFLITE ]; then
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
+
+    echo "===> Running ONNXSIM..."
+    MODEL_ONNX_SIM="${MODEL_ONNX_SIM:-${REPO_ROOT_DIR}/${OUTPUT_DIR}${EXPORTED_MODEL_OUTPUT_DIR}_sim.onnx}"
+
+    onnxsim ${MODEL_ONNX} ${MODEL_ONNX_SIM}
+    mv ${MODEL_ONNX_SIM} ${MODEL_ONNX}
+
+    # [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]]
 
     onnx2tf \
         -cind images $CALIBRATION_NUMPY_ARRAY [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
@@ -157,6 +164,7 @@ MODEL_PREPROCESSED_TFLITE="${MODEL_PREPROCESSED_TFLITE:-${REPO_ROOT_DIR}/${OUTPU
 
 if [ ! -f $MODEL_PREPROCESSED_TFLITE ]; then
     echo "===> Preprocessing Model TFLite..."
+    # -mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
     tflite_preprocess $MODEL_TFLITE  --mean 127.5 127.5 127.5 --scale 127.5 127.5 127.5
     echo "===> Model TFLite preprocessed."
 else
