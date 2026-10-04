@@ -207,13 +207,27 @@ def main() -> None:
     model.eval()
 
     checkpoint = torch.load(args.ckpt, map_location=device, weights_only=False)
-    if "state_dict" in checkpoint:
-        state_dict = checkpoint["state_dict"]
-        # Remove 'module.' prefix if the model was trained with DataParallel
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    else:
-        state_dict = checkpoint
-    model.load_state_dict(state_dict, strict=False)
+    state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) else checkpoint
+
+    remapped_state_dict = {}
+
+    for key, val in state_dict.items():
+        # Skip Vitis-AI fake-quantizer metadata
+        if "quantizer" in key:
+            continue
+
+        # Strip leading 'model.' if present
+        if key.startswith("model."):
+            key = key[6:]
+
+        # Remap nested BN keys to match base model naming
+        key = key.replace("_conv.bn.", "_bn.")  # e.g., dw_conv.bn. -> dw_bn., pwl_conv.bn. -> pwl_bn.
+        key = key.replace(".conv.bn.", ".bn.")  # e.g., layer0.conv.bn. -> layer0.bn.
+
+        remapped_state_dict[key] = val
+
+
+    model.load_state_dict(remapped_state_dict, strict=True)
 
     dummy_input = torch.randn(*tuple(args.input_shape), device=device)
     with torch.no_grad():

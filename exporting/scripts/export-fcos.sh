@@ -18,6 +18,8 @@ REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     export MODEL_BACKBONE_OUTPUT_LAYER_NAMES=""
     export MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES="boxes scores labels"
 
+    export NORMALIZATION_MEAN_FLOAT32="0.485,0.456,0.406"
+    export NORMALIZATION_STD_FLOAT32="0.229,0.224,0.225"
 
     export CALIBRATION_IMAGES_DIR="output/images/ccn1-od-384x288-test-sample/raw"
 
