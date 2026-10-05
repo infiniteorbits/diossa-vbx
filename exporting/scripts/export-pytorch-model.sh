@@ -155,7 +155,7 @@ if [ ! -f $MODEL_TFLITE ]; then
     mv ${MODEL_ONNX_SIM} ${MODEL_ONNX}
 
     onnx2tf \
-        -cind images $CALIBRATION_NUMPY_ARRAY [[[${NORMALIZATION_MEAN_FLOAT32}]]] [[[${NORMALIZATION_STD_FLOAT32}]]] \
+        -cind images $CALIBRATION_NUMPY_ARRAY [[[[${NORMALIZATION_MEAN_FLOAT32}]]]] [[[[${NORMALIZATION_STD_FLOAT32}]]]] \
         -ois images:1,3,${MODEL_INPUT_HEIGHT},${MODEL_INPUT_WIDTH} \
         -i ${MODEL_ONNX} \
         --output_signaturedefs \
@@ -174,8 +174,8 @@ if [ ! -f $MODEL_PREPROCESSED_TFLITE ]; then
     echo "===> Preprocessing Model TFLite..."
 
     # Assume NORMALIZATION_MEAN_FLOAT32 is a space-separated tuple, e.g. "0.485 0.456 0.406"
-    NORMALIZATION_MEAN_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_MEAN_FLOAT32}'.split()]))")
-    NORMALIZATION_STD_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_STD_FLOAT32}'.split()]))")
+    NORMALIZATION_MEAN_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_MEAN_FLOAT32}'.split(',')]))")
+    NORMALIZATION_STD_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_STD_FLOAT32}'.split(',')]))")
 
     tflite_preprocess $MODEL_TFLITE  --mean ${NORMALIZATION_MEAN_AS_INT8_DECIMAL} --scale ${NORMALIZATION_STD_AS_INT8_DECIMAL}
     echo "===> Model TFLite preprocessed."
