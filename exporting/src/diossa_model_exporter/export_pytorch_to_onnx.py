@@ -25,6 +25,7 @@ The post-processing constructor receives only the kwargs it accepts.
 import argparse
 import inspect
 import json
+import re
 from pathlib import Path
 
 import torch
@@ -48,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         "--model-class", type=str, required=True,
         help="Full dotted class path to model, e.g. "
         "'nn_models_pytorch.keypoints_regression.mobilepose.MobilePose'",
+    )
+    parser.add_argument(
+        "--remapper-class", type=str, default=None,
+        help="Full dotted class path to remapper, e.g. "
+        "'diossa_model_exporter.remappers.fcos.remap_fcos_state_dict'",
     )
     parser.add_argument(
         "--device", type=str, default="cpu",
@@ -209,23 +215,11 @@ def main() -> None:
     checkpoint = torch.load(args.ckpt, map_location=device, weights_only=False)
     state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) else checkpoint
 
-    remapped_state_dict = {}
-
-    for key, val in state_dict.items():
-        # Skip Vitis-AI fake-quantizer metadata
-        if "quantizer" in key:
-            continue
-
-        # Strip leading 'model.' if present
-        if key.startswith("model."):
-            key = key[6:]
-
-        # Remap nested BN keys to match base model naming
-        key = key.replace("_conv.bn.", "_bn.")  # e.g., dw_conv.bn. -> dw_bn., pwl_conv.bn. -> pwl_bn.
-        key = key.replace(".conv.bn.", ".bn.")  # e.g., layer0.conv.bn. -> layer0.bn.
-
-        remapped_state_dict[key] = val
-
+    if args.remapper_class is not None:
+        remapper_class = load_model_class(args.remapper_class)
+        remapped_state_dict = remapper_class()(state_dict)
+    else:
+        remapped_state_dict = state_dict
 
     model.load_state_dict(remapped_state_dict, strict=True)
 
