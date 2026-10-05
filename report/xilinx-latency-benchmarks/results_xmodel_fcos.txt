@@ -1,0 +1,15 @@
+Model,FPS,Total_Frames,Duration_Sec
+fcos/fcos_288x384_2c.xmodel,19.301,1159,60.0488
+fcos/fcos_480x640_2c.xmodel,8.33322,501,60.1208
+fcos/fcos_224x224_2c.xmodel,41.3008,2479,60.0231
+fcos/fcos_192x192_2c.xmodel,53.0856,3186,60.0163
+fcos/fcos_384x512_2c.xmodel,13.1101,787,60.0301
+fcos/fcos_480x480_2c.xmodel,10.8829,654,60.094
+fcos/fcos_128x128_2c.xmodel,90.0431,5403,60.0046
+fcos/fcos_192x256_2c.xmodel,42.7445,2565,60.0077
+fcos/fcos_96x128_2c.xmodel,91.9264,5516,60.0045
+fcos/fcos_96x96_2c.xmodel,100.421,6026,60.0075
+fcos/fcos_160x160_2c.xmodel,58.0615,3484,60.0054
+fcos/fcos_384x384_2c.xmodel,17.1079,1027,60.0308
+fcos/fcos_256x256_2c.xmodel,36.726,2204,60.012
+fcos/fcos_640x640_2c.xmodel,6.61383,397,60.0258

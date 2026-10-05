@@ -15,14 +15,14 @@ APP_NAME="${APP_NAME:-single-model-runner}"
 SKIP_EXISTING="${SKIP_EXISTING:-0}"
 
 # Keypoint regression (224x224).
-MODEL_VNNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17.vnnx
-MODEL_ONNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17_postprocessing.onnx
-SAMPLE_DIR=output/images/ccn1-kr-224x224-test-sample
+#MODEL_VNNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17.vnnx
+#MODEL_ONNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17_postprocessing.onnx
+#SAMPLE_DIR=output/images/ccn1-kr-224x224-test-sample
 
 # Object detection (384x288).
-# MODEL_VNNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19.vnnx
-# MODEL_ONNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19_postprocessing.onnx
-# SAMPLE_DIR=output/images/ccn1-od-384x288-test-sample
+MODEL_VNNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19.vnnx
+MODEL_ONNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19_postprocessing.onnx
+SAMPLE_DIR=output/images/ccn1-od-384x288-test-sample
 
 SAMPLE_RAW="${SAMPLE_DIR}/raw"
 PRED_DIR="${SAMPLE_DIR}/pred"
