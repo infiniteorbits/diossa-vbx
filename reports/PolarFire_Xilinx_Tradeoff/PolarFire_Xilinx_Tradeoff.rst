@@ -66,20 +66,18 @@ Show that the CCN1 networks can be compiled and executed on PolarFire,
 and put the measured latency next to the Xilinx DPU and CPU-head
 measurements from the earlier benchmarking campaign.
 
-Scored accuracy on the PolarFire sample (IoU, keypoint error) is not
+Accuracy on the PolarFire sample (IoU, keypoint error) is not
 part of this issue. The CCN1 validation numbers remain the accuracy
 record. A few overlays are included so the running chain can be seen.
 
 Scope
 -----
 
-- Object detection: FCOS, input 384 × 288, checkpoint ``quare-delf``
-  epoch 19.
-- Keypoint regression: MobilePose, input 224 × 224, 20 keypoints,
-  checkpoint ``bijou-rasp`` epoch 17.
+This note focuses on two specific models and configurations from CCN1:
+- FCOS for object detection, using an input size of 384 × 288, checkpointed at ``quare-delf``.
+- MobilePose for keypoint regression, using an input size of 224 × 224 with 20 keypoints, checkpointed at ``bijou-rasp``.
 
-A second FCOS resolution, 640 × 480, was trained in CCN1. It is quoted
-only as context. It was not compiled for PolarFire.
+An additional FCOS network at 640 × 480 resolution was also trained during CCN1 and may be referenced for context, but it was not deployed or compiled for PolarFire as part of this comparison.
 
 Applicable Documents
 --------------------
@@ -105,7 +103,7 @@ Reference Documents
    | **RD-n** | **Document Title**                                           |
    +----------+--------------------------------------------------------------+
    | RD-1     | VectorBlox SDK, Tutorial Walkthrough Guide                   |
-   |          | (``third-party/vbx-sdk/docs/tutorial_walkthrough_guide.md``) |
+   |          | (``VectorBlox-SDK/docs/tutorial_walkthrough_guide.md``) |
    +----------+--------------------------------------------------------------+
    | RD-2     | Microchip VectorBlox Accelerator SDK, product description    |
    |          | of the 3.1 release                                           |
@@ -138,20 +136,21 @@ How the network is split
 
 Following the previous DIOSSA phases, each network is split in two.
 
-The first part runs on the FPGA accelerator. It is kept as large as the
+The first part runs on the FPGA accelerator, we refer to it as the "edge". It is kept as large as the
 core will accept, so the convolutional trunk uses the accelerator and
 the CPU is left with as little as possible.
 
 The second part stays on the CPU. It is the tail that cannot be placed
-on the accelerator. For VectorBlox that tail is whatever does not
-survive the path to a full-integer INT8 TensorFlow Lite graph and then
-to ``vnnx_compile``. The reasons a layer is left behind are:
+on the accelerator. For VectorBlox, the “tail” refers to any part of 
+the network that cannot make it through the conversion 
+to a fully integer INT8 TensorFlow Lite graph 
+and subsequent compilation with ``vnnx_compile``. 
+The reasons a layer may be left out include:
 
 - the operator is outside the INT8 TensorFlow Lite set that VectorBlox
   compiles [RD-1];
-- the layer is post-processing rather than a convolution. The SDK
-  tutorials cut this off on purpose (``tflite_cut`` on YOLOv8) before
-  compilation: box decoding, non-maximum suppression, top-k, and the
+- the layer is post-processing rather than a convolution. For example:
+  box decoding, non-maximum suppression, top-k selection, and the
   reduction from a heatmap to a coordinate;
 - the tensor shape is dynamic, or an attribute of the operator (rank,
   dilation, alignment) is not accepted by the compiler;
@@ -162,28 +161,28 @@ to ``vnnx_compile``. The reasons a layer is left behind are:
 On PolarFire the CPU tail is an ONNX graph executed by ONNX Runtime on
 the RISC-V application cores. Accelerator outputs are dequantized on
 the CPU and then passed into that graph. FCOS consumes the box, class,
-and centerness maps and emits boxes, scores, and labels. MobilePose
-consumes the heatmaps and emits coordinates. The same split was used
-on the Xilinx side: the DPU runs an ``.xmodel``, and the post-processing
-head runs as ONNX on the MPSoC CPU.
+and centerness feature maps and emits boxes, scores, and labels. MobilePose
+consumes the unnormalized heatmaps and emits coordinates and normalized heatmaps.
+The same split was used on the Xilinx side: 
+the DPU runs an ``.xmodel``, and the post-processing head runs as ONNX on the MPSoC CPU.
 
 Embedding a PyTorch model on PolarFire
 ======================================
 
-VectorBlox does not execute PyTorch. The published SDK 3.1 path for an
-ONNX model is: convert to TensorFlow Lite, quantize to INT8 if the file
-is not already quantized, insert preprocessing with
-``tflite_preprocess``, and compile with ``vnnx_compile`` [RD-1], [RD-2].
-The DIOSSA builds follow that path. The steps actually run are:
+VectorBlox does not natively support PyTorch models. 
+To deploy a PyTorch model to PolarFire's FPGA accelerator it must be converted 
+into VNNX format using the VectorBlox SDK.
+
+We use the following steps:
 
 1. Load the PyTorch checkpoint and export two ONNX files. One is the
-   accelerator trunk. The other is the CPU head.
+   accelerator "edge" part. The other is the CPU "TAIL" part.
 2. Build a calibration sample. One hundred images are taken from the
    CCN1 test sample, resized to the network input, and stored as a
    NumPy array. The array is normalized with the ImageNet mean
    (0.485, 0.456, 0.406) and standard deviation (0.229, 0.224, 0.225).
-3. Simplify the ONNX graph with ``onnxsim``, so the converter sees a
-   static graph without the training-time debris.
+3. Simplify the ONNX graph with ``onnxsim``, so the converter receives a
+   static graph without extra nodes or artifacts left from training.
 4. Convert ONNX to full-integer INT8 TensorFlow Lite with ``onnx2tf``.
    This step both translates the graph and quantizes it. The
    calibration array is what the quantizer uses to pick a scale and a
@@ -211,9 +210,9 @@ produced and there was nothing to compile.
 The weights that did quantize are the CCN1 quantization-aware
 checkpoints, ``quare-delf`` and ``bijou-rasp``. They are still stored
 as float32. They were trained with Vitis-AI fake quantization, so the
-values already sit on a grid that post-training quantization can
+values already sit on a grid that post-training quantization (PTQ)can
 represent. With those weights the same calibration sample produces a
-finite scale and zero-point, and the compile goes through.
+finite scale and zero-point, and we can proceed with the compilation.
 
 This is the same pair that was embedded on the Xilinx DPU in CCN1.
 The float parents are the accuracy reference. They are not the binaries
@@ -223,21 +222,21 @@ Xilinx accuracy baseline
 ========================
 
 The figures in this section are copied from AD-1. They were measured on
-the CCN1 validation set. They are not re-measured in this issue, and
+the CCN1 test set. They are not re-measured in this issue, and
 they are not PolarFire numbers. Inference rates quoted from AD-1 were
 measured on a laptop RTX 3070, not on the DPU.
 
 Object detection (FCOS)
 -----------------------
 
-FCOS was selected over Faster R-CNN in CCN1. On a 480 × 640 input the
-float FCOS reached IoU 0.874 and mAP at IoU 0.75 of 0.956, against
+During CCN1, FCOS was selected over Faster R-CNN. On a 480 × 640 input the
+float FCOS reached IoU 0.874 and mAP@IoU>0.75 of 0.956, against
 0.853 and 0.901 for Faster R-CNN, at 45.78 FPS against 37.66 FPS on the
-RTX 3070, with 32.1 M parameters against 43 M. Faster R-CNN cannot be
-trained with the Vitis-AI quantization-aware procedure, so it was
+RTX 3070, with 32.1 M parameters against 43 M. Faster R-CNN wasn't possible to be
+trained with the Vitis-AI QAT procedure, so it was
 dropped.
 
-The embedded resolution is 384 × 288. The best float model at that size
+We then lowered the resolution to 384 × 288. The best float model at that size
 is ``licit-weal`` (IoU 0.925). Quantization-aware training from that
 checkpoint produced ``quare-delf`` (IoU 0.858). The loss accepted in
 CCN1 is 0.067 IoU. The 640 × 480 QAT run lost more (IoU 0.958 down to
