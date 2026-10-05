@@ -11,13 +11,13 @@ REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 APP_NAME="${APP_NAME:-single-model-runner}"
 
-# TEST_MODEL_VNNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17.vnnx
-# TEST_MODEL_ONNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17_postprocessing.onnx
-# TEST_MODEL_IMAGE=output/images/ccn1-kr-224x224-test-sample/raw/VisCam_0031435.jpg
+TEST_MODEL_VNNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17.vnnx
+TEST_MODEL_ONNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17_postprocessing.onnx
+TEST_MODEL_IMAGE=output/images/ccn1-kr-224x224-test-sample/raw/VisCam_0031435.jpg
 
-TEST_MODEL_VNNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19.vnnx
-TEST_MODEL_ONNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19_postprocessing.onnx
-TEST_MODEL_IMAGE=output/images/ccn1-od-288x384-test-sample/raw/VisCam_0031435.jpg
+# TEST_MODEL_VNNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19.vnnx
+# TEST_MODEL_ONNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19_postprocessing.onnx
+# TEST_MODEL_IMAGE=output/images/ccn1-od-384x288-test-sample/raw/VisCam_0031435.jpg
 
 
 echo "===> Transferring apps to device..."
