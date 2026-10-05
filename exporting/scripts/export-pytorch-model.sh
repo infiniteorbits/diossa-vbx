@@ -160,8 +160,11 @@ if [ ! -f $MODEL_TFLITE ]; then
     onnxsim ${MODEL_ONNX} ${MODEL_ONNX_SIM}
     mv ${MODEL_ONNX_SIM} ${MODEL_ONNX}
 
+    # Mean/std must be NHWC with a leading batch axis: [[[[r,g,b]]]].
+    # Three brackets broadcast to (H, W, 3). TFLite then resizes the graph
+    # input to rank 3, and the leading Pad (paddings [4, 2]) fails to prepare.
     onnx2tf \
-        -cind images $CALIBRATION_NUMPY_ARRAY [[[[${NORMALIZATION_MEAN_FLOAT32}]]]] [[[[${NORMALIZATION_STD_FLOAT32}]]]] \
+        -cind images "$CALIBRATION_NUMPY_ARRAY" "[[[[${NORMALIZATION_MEAN_FLOAT32}]]]]" "[[[[${NORMALIZATION_STD_FLOAT32}]]]]" \
         -ois images:1,3,${MODEL_INPUT_HEIGHT},${MODEL_INPUT_WIDTH} \
         -i ${MODEL_ONNX} \
         --output_signaturedefs \
@@ -179,9 +182,9 @@ MODEL_PREPROCESSED_TFLITE="${MODEL_PREPROCESSED_TFLITE:-${REPO_ROOT_DIR}/${OUTPU
 if [ ! -f $MODEL_PREPROCESSED_TFLITE ]; then
     echo "===> Preprocessing Model TFLite..."
 
-    # Assume NORMALIZATION_MEAN_FLOAT32 is a space-separated tuple, e.g. "0.485 0.456 0.406"
-    NORMALIZATION_MEAN_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_MEAN_FLOAT32}'.split(',')]))")
-    NORMALIZATION_STD_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(['{:.1f}'.format(float(x) * 255) for x in '${NORMALIZATION_STD_FLOAT32}'.split(',')]))")
+    # Comma-separated float values, e.g. "0.485,0.456,0.406", scaled into 0..255.
+    NORMALIZATION_MEAN_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(format(float(x) * 255, '.10g') for x in '${NORMALIZATION_MEAN_FLOAT32}'.replace(',', ' ').split()))")
+    NORMALIZATION_STD_AS_INT8_DECIMAL=$(python3 -c "print(' '.join(format(float(x) * 255, '.10g') for x in '${NORMALIZATION_STD_FLOAT32}'.replace(',', ' ').split()))")
 
     tflite_preprocess $MODEL_TFLITE  --mean ${NORMALIZATION_MEAN_AS_INT8_DECIMAL} --scale ${NORMALIZATION_STD_AS_INT8_DECIMAL}
     echo "===> Model TFLite preprocessed."
