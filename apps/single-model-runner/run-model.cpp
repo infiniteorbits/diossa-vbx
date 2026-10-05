@@ -288,6 +288,116 @@ static std::vector<int64_t> vbx_output_shape(const model_t* model, int index) {
 	return shape;
 }
 
+// Same rank, and every fixed ONNX dim equals the VBX dim. A negative ONNX dim
+// matches any VBX size.
+static bool static_dims_match(const std::vector<int64_t>& onnx_shape,
+		const std::vector<int64_t>& vbx_shape) {
+	if (onnx_shape.size() != vbx_shape.size()) {
+		return false;
+	}
+	for (size_t i = 0; i < onnx_shape.size(); ++i) {
+		if (onnx_shape[i] >= 0 && onnx_shape[i] != vbx_shape[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// True when resolve_shape would accept this pair without throwing.
+static bool can_resolve_shape(const std::vector<int64_t>& onnx_shape,
+		const std::vector<int64_t>& vbx_shape, size_t vbx_len) {
+	if (static_dims_match(onnx_shape, vbx_shape)) {
+		return true;
+	}
+	if (onnx_shape.size() == vbx_shape.size()) {
+		return false;
+	}
+	int dynamic = 0;
+	int64_t known = 1;
+	for (int64_t dim : onnx_shape) {
+		if (dim < 0) {
+			dynamic++;
+		} else {
+			known *= dim;
+		}
+	}
+	if (dynamic == 0 && known == (int64_t)vbx_len) {
+		return true;
+	}
+	return dynamic == 1 && known > 0 && (vbx_len % (size_t)known) == 0;
+}
+
+// VNNX outputs follow compiler execution order. The CPU graph follows the
+// order the backbone returned them. FCOS returns five box maps, then five
+// class maps, then five centerness maps, while the VNNX file emits each
+// pyramid level as it is produced (P6, P7, P5, P4, P3 on these models).
+// Index pairing then compares P3 [1, 4, 36, 48] with P6 [1, 4, 5, 6].
+//
+// Pairing walks ONNX inputs from 0 upward and gives each the lowest-index
+// unused VBX output of the same shape. A shape that occurs more than once
+// keeps that index order on both sides: the first such ONNX input gets the
+// first such VBX output, the second gets the second, and so on.
+static std::vector<size_t> pair_vbx_outputs(const std::vector<std::string>& input_names,
+		const std::vector<std::vector<int64_t>>& onnx_shapes,
+		const std::vector<std::vector<int64_t>>& vbx_shapes,
+		const std::vector<size_t>& vbx_lengths) {
+	size_t count = onnx_shapes.size();
+	std::vector<size_t> identity(count);
+	bool index_order = true;
+	for (size_t i = 0; i < count; ++i) {
+		identity[i] = i;
+		if (!can_resolve_shape(onnx_shapes[i], vbx_shapes[i], vbx_lengths[i])) {
+			index_order = false;
+		}
+	}
+	if (index_order) {
+		return identity;
+	}
+
+	std::vector<size_t> order(count);
+	std::vector<char> used(count, 0);
+	size_t shared = 0;
+	for (size_t i = 0; i < count; ++i) {
+		size_t matches = 0;
+		size_t chosen = count;
+		for (size_t j = 0; j < count; ++j) {
+			if (used[j] || !static_dims_match(onnx_shapes[i], vbx_shapes[j])) {
+				continue;
+			}
+			matches++;
+			if (chosen == count) {
+				chosen = j;
+			}
+		}
+		if (chosen == count) {
+			std::ostringstream out;
+			out << "VNNX output order does not match the ONNX inputs, and ONNX input "
+				<< i << " " << input_names[i] << " " << shape_string(onnx_shapes[i])
+				<< " has no unused VBX output of that shape.\n";
+			for (size_t n = 0; n < count; ++n) {
+				out << "ONNX input " << n << " " << input_names[n] << " " << shape_string(onnx_shapes[n]) << "\n";
+			}
+			for (size_t n = 0; n < count; ++n) {
+				out << "VBX output " << n << " " << shape_string(vbx_shapes[n]) << "\n";
+			}
+			throw std::runtime_error(out.str());
+		}
+		if (matches > 1) {
+			shared++;
+		}
+		used[chosen] = 1;
+		order[i] = chosen;
+	}
+
+	printf("VNNX outputs are not in ONNX input order. Pairing the %zu tensors by shape.\n", count);
+	if (shared > 0) {
+		printf("  %zu ONNX inputs share a shape with another input. "
+				"Those are paired in index order: earliest ONNX input with earliest VBX output.\n",
+				shared);
+	}
+	return order;
+}
+
 // Fill dynamic ONNX dims from the VBX tensor. A rank change is accepted when
 // the element count matches, which is a reshape of the same contiguous buffer.
 static std::vector<int64_t> resolve_shape(const std::vector<int64_t>& onnx_shape,
@@ -586,22 +696,37 @@ static void run_onnx_head(const char* onnx_path, const char* image_path, const m
 	std::vector<Ort::Value> ort_inputs;
 	ort_inputs.reserve(num_inputs);
 
-	struct timeval prep_start, prep_end;
-	gettimeofday(&prep_start, NULL);
+	std::vector<std::vector<int64_t>> onnx_shapes(num_inputs);
+	std::vector<ONNXTensorElementDataType> onnx_types(num_inputs);
 	for (size_t i = 0; i < num_inputs; ++i) {
 		auto type_info = session.GetInputTypeInfo(i);
 		if (type_info.GetONNXType() != ONNX_TYPE_TENSOR) {
 			throw std::runtime_error("ONNX input " + input_names[i] + " is not a tensor");
 		}
 		auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-		ONNXTensorElementDataType onnx_type = tensor_info.GetElementType();
-		std::vector<int64_t> onnx_shape = tensor_info.GetShape();
+		onnx_types[i] = tensor_info.GetElementType();
+		onnx_shapes[i] = tensor_info.GetShape();
+	}
+	std::vector<std::vector<int64_t>> vbx_shapes(num_inputs);
+	std::vector<size_t> vbx_lengths(num_inputs);
+	for (size_t i = 0; i < num_inputs; ++i) {
+		vbx_shapes[i] = vbx_output_shape(model, (int)i);
+		vbx_lengths[i] = model_get_output_length(model, (int)i);
+	}
+	std::vector<size_t> vbx_for_onnx = pair_vbx_outputs(input_names, onnx_shapes, vbx_shapes, vbx_lengths);
 
-		vbx_cnn_calc_type_e vbx_type = model_get_output_datatype(model, (int)i);
-		std::vector<int64_t> vbx_shape = vbx_output_shape(model, (int)i);
-		size_t length = model_get_output_length(model, (int)i);
-		float scale = model_get_output_scale_value(model, (int)i);
-		int zero_point = model_get_output_zeropoint(model, (int)i);
+	struct timeval prep_start, prep_end;
+	gettimeofday(&prep_start, NULL);
+	for (size_t i = 0; i < num_inputs; ++i) {
+		size_t vbx_index = vbx_for_onnx[i];
+		ONNXTensorElementDataType onnx_type = onnx_types[i];
+		std::vector<int64_t> onnx_shape = onnx_shapes[i];
+
+		vbx_cnn_calc_type_e vbx_type = model_get_output_datatype(model, (int)vbx_index);
+		std::vector<int64_t> vbx_shape = vbx_shapes[vbx_index];
+		size_t length = vbx_lengths[vbx_index];
+		float scale = model_get_output_scale_value(model, (int)vbx_index);
+		int zero_point = model_get_output_zeropoint(model, (int)vbx_index);
 		bool reshaped = false;
 		std::vector<int64_t> shape = resolve_shape(onnx_shape, vbx_shape, length, &reshaped);
 		int64_t resolved_count = 1;
@@ -610,28 +735,28 @@ static void run_onnx_head(const char* onnx_path, const char* image_path, const m
 		}
 		if (resolved_count != (int64_t)length) {
 			throw std::runtime_error("ONNX input " + input_names[i] + " resolves to " +
-					std::to_string(resolved_count) + " elements but VBX output " + std::to_string(i) +
+					std::to_string(resolved_count) + " elements but VBX output " + std::to_string(vbx_index) +
 					" has " + std::to_string(length));
 		}
 
-		printf("VBX output %zu: %s %s scale=%g zero=%d\n", i, vbx_type_name(vbx_type),
+		printf("VBX output %zu: %s %s scale=%g zero=%d\n", vbx_index, vbx_type_name(vbx_type),
 				shape_string(vbx_shape).c_str(), scale, zero_point);
 
 		if (onnx_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
 			float_inputs[i].resize(length);
-			dequantize(float_inputs[i].data(), cpu_outputs[i], length, vbx_type, scale, zero_point);
+			dequantize(float_inputs[i].data(), cpu_outputs[vbx_index], length, vbx_type, scale, zero_point);
 			ort_inputs.push_back(Ort::Value::CreateTensor<float>(
 					memory, float_inputs[i].data(), length, shape.data(), shape.size()));
 			printf("  -> ONNX input %s float32 %s (dequantized)\n", input_names[i].c_str(), shape_string(shape).c_str());
 		} else if (onnx_type == vbx_to_onnx_type(vbx_type)) {
 			size_t nbytes = length * (size_t)calc_type_bytes(vbx_type);
 			ort_inputs.push_back(Ort::Value::CreateTensor(
-					memory, cpu_outputs[i], nbytes, shape.data(), shape.size(), onnx_type));
+					memory, cpu_outputs[vbx_index], nbytes, shape.data(), shape.size(), onnx_type));
 			printf("  -> ONNX input %s %s %s (raw accelerator values)\n", input_names[i].c_str(),
 					onnx_type_name(onnx_type), shape_string(shape).c_str());
 		} else {
 			throw std::runtime_error("ONNX input " + input_names[i] + " is " + onnx_type_name(onnx_type) +
-					" but VBX output " + std::to_string(i) + " is " + vbx_type_name(vbx_type) +
+					" but VBX output " + std::to_string(vbx_index) + " is " + vbx_type_name(vbx_type) +
 					". Use float32 to receive dequantized values, or the same integer type to receive raw values.");
 		}
 		if (reshaped) {
@@ -667,7 +792,9 @@ int main(int argc, char** argv) {
 		fprintf(stderr,
 				"Usage: %s MODEL.vnnx IMAGE.jpg HEAD.onnx\n"
 				"  IMAGE.jpg may be TEST_DATA to use the vectors stored in the VNNX file.\n"
-				"  HEAD.onnx runs on the CPU. Its inputs are the VNNX outputs, in order.\n"
+				"  HEAD.onnx runs on the CPU. Its inputs are the VNNX outputs.\n"
+				"  Inputs are paired by index when the shapes match, otherwise by shape.\n"
+				"  A repeated shape is paired in index order on both sides.\n"
 				"  float32 inputs are dequantized as (q - zero_point) * scale.\n"
 				"  Matching integer inputs receive the raw accelerator values.\n",
 				argv[0]);

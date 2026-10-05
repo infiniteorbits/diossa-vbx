@@ -51,7 +51,7 @@ make CC=riscv64-unknown-linux-gnu-gcc CXX=riscv64-unknown-linux-gnu-g++ ORT_DIR=
 
 ## What the ONNX graph must look like
 
-ONNX inputs and VNNX outputs are paired by index: VBX output 0 feeds ONNX input 0, and so on. The counts must match.
+ONNX inputs and VNNX outputs must be the same count. They are paired by index when those shapes already agree. Otherwise each ONNX input, from first to last, takes the earliest unused VBX output of the same shape. A shape that occurs more than once keeps that order: the first such input is paired with the first such output, the second with the second, and so on. FCOS needs the reorder: the accelerator emits the fifteen maps in execution order, while the CPU graph expects every box map, then every class map, then every centerness map.
 
 - A `float32` input is filled with dequantized accelerator values, `(q - zero_point) * scale`, using the scale and zero-point stored in the VNNX file.
 - An integer input whose dtype matches the accelerator output (`int8`, `uint8`, `int16`, or `int32`) receives the raw values. Use this when the ONNX graph itself starts with dequantization.
