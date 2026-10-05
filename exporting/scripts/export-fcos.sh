@@ -21,6 +21,8 @@ REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     export NORMALIZATION_MEAN_FLOAT32="0.485,0.456,0.406"
     export NORMALIZATION_STD_FLOAT32="0.229,0.224,0.225"
 
+    export REMAPPER_CLASS="diossa_model_exporter.remappers.fcos.FCOSRemapper"
+
     export CALIBRATION_IMAGES_DIR="output/images/ccn1-od-384x288-test-sample/raw"
 
     export EXPORTED_MODEL_OUTPUT_DIR="$(basename ${MODEL_CKPT/.ckpt/})"

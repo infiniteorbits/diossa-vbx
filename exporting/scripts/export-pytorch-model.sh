@@ -36,9 +36,14 @@ if [ -z "${NORMALIZATION_STD_FLOAT32:-}" ]; then
     exit 1
 fi
 
+if [ -z "${REMAPPER_CLASS:-}" ]; then
+    echo "Error: REMAPPER_CLASS environment variable must be set." >&2
+    exit 1
+fi
+
 MODEL_KWARGS="${MODEL_KWARGS:-}"
 
-MODEL_BACKBONE_OUTPUT_LAYER_NAMES="${MODEL_BACKBONE_OUTPUT_LAYER_NAMES:-}"c
+MODEL_BACKBONE_OUTPUT_LAYER_NAMES="${MODEL_BACKBONE_OUTPUT_LAYER_NAMES:-}"
 MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES="${MODEL_POSTPROCESSING_OUTPUT_LAYER_NAMES:-}"
 
 
@@ -77,6 +82,7 @@ if [ ! -f "${MODEL_ONNX}" ] || [ "${NEED_POSTPROCESSING}" -eq 1 ]; then
         --onnx "${MODEL_ONNX}"
         --input-shape ${MODEL_INPUT_BCHW_SHAPE}
         --model-class "${MODEL_CLASS}"
+        --remapper-class "${REMAPPER_CLASS}"
         --input-names input
     )
     if [ -n "${MODEL_KWARGS}" ]; then
