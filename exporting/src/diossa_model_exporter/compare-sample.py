@@ -9,12 +9,13 @@ ground-truth box by IoU.
 
 Each comparison also writes pred_annot/. Ground truth is green and the
 prediction is red. Keypoint samples show the points. Detection samples
-show the one ground-truth box and the highest-scoring box.
+show the one ground-truth box and the highest-scoring box. ``--pair-lines``
+draws a yellow line from each ground-truth keypoint to its prediction.
 
 Usage:
     python -m diossa_model_exporter.compare-sample \
         --sample-dir output/images/ccn1-kr-224x224-test-sample \
-        --task keypoints
+        --task keypoints --pair-lines
 
     python -m diossa_model_exporter.compare-sample \
         --sample-dir output/images/ccn1-od-384x288-test-sample \
@@ -69,6 +70,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output", type=pathlib.Path, default=None,
         help="Metrics JSON path (default: <sample-dir>/metrics.json)",
+    )
+    parser.add_argument(
+        "--pair-lines", action="store_true",
+        help="Draw a line between each ground-truth keypoint and its prediction",
     )
     return parser.parse_args()
 
@@ -179,12 +184,35 @@ def scale_coords(coords: np.ndarray, input_hw: tuple[int, int], heatmap_hw: tupl
 
 GT_COLOR = (0, 255, 0)
 PRED_COLOR = (0, 0, 255)
+PAIR_COLOR = (0, 255, 255)
 
 
 def draw_box(canvas: np.ndarray, box: np.ndarray, color: tuple[int, int, int]) -> None:
     """Draw one xyxy box."""
     x1, y1, x2, y2 = (int(round(float(value))) for value in box[:4])
     cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 1)
+
+
+def draw_pair_lines(
+    canvas: np.ndarray,
+    gt_keypoints: np.ndarray,
+    pred_keypoints: np.ndarray,
+    visible: Optional[np.ndarray] = None,
+) -> None:
+    """Draw a line from each ground-truth keypoint to the prediction with the same index."""
+    count = min(len(gt_keypoints), len(pred_keypoints))
+    for index in range(count):
+        if visible is not None and index < len(visible) and not bool(visible[index]):
+            continue
+        start = (
+            int(round(float(gt_keypoints[index, 0]))),
+            int(round(float(gt_keypoints[index, 1]))),
+        )
+        end = (
+            int(round(float(pred_keypoints[index, 0]))),
+            int(round(float(pred_keypoints[index, 1]))),
+        )
+        cv2.line(canvas, start, end, PAIR_COLOR, 1, cv2.LINE_AA)
 
 
 def draw_keypoints(canvas: np.ndarray, keypoints: np.ndarray, color: tuple[int, int, int]) -> None:
@@ -211,6 +239,8 @@ def save_pred_annot(
     pred_keypoints: Optional[np.ndarray],
     gt_box: Optional[np.ndarray],
     pred_box: Optional[np.ndarray],
+    pair_lines: bool = False,
+    visible: Optional[np.ndarray] = None,
 ) -> None:
     """Draw ground truth in green and the prediction in red, then save pred_annot/."""
     stem = pathlib.Path(filename).stem
@@ -218,10 +248,12 @@ def save_pred_annot(
     image = cv2.imread(str(raw_path), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"Could not read {raw_path}")
-
+    
     canvas = image.copy()
     if gt_box is not None:
         draw_box(canvas, gt_box, GT_COLOR)
+    if pair_lines and gt_keypoints is not None and pred_keypoints is not None:
+        draw_pair_lines(canvas, gt_keypoints, pred_keypoints, visible)
     if gt_keypoints is not None:
         draw_keypoints(canvas, gt_keypoints, GT_COLOR)
     if pred_box is not None:
@@ -265,7 +297,10 @@ def compare_keypoints(args: argparse.Namespace) -> dict[str, Any]:
         with gt_path.open() as handle:
             ground_truth = json.load(handle)
         target, visible = visible_keypoints(ground_truth["keypoints"])
-        save_pred_annot(args.sample_dir, pred_path.name, target, predicted, None, None)
+        save_pred_annot(
+            args.sample_dir, pred_path.name, target, predicted, None, None,
+            pair_lines=args.pair_lines, visible=visible,
+        )
         if predicted.shape[0] != target.shape[0]:
             raise ValueError(
                 f"{pred_path.name} has {predicted.shape[0]} keypoints, "

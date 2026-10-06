@@ -24,7 +24,8 @@ run_comparison() {
 run_comparison \
     "MobilePose keypoints" \
     "${REPO_ROOT_DIR}/output/images/ccn1-kr-224x224-test-sample" \
-    "${REPO_ROOT_DIR}/exporting/scripts/compare-mobilepose-sample.sh"
+    "${REPO_ROOT_DIR}/exporting/scripts/compare-mobilepose-sample.sh" \
+    --pair-lines
 
 run_comparison \
     "FCOS boxes" \
