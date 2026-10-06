@@ -222,8 +222,7 @@ Xilinx accuracy baseline
 
 The figures in this section are copied from AD-1. They were measured on
 the CCN1 test set. They are not re-measured in this issue, and
-they are not PolarFire numbers. Inference rates quoted from AD-1 were
-measured on a laptop RTX 3070, not on the DPU.
+they are not PolarFire numbers.
 
 Object detection (FCOS)
 -----------------------
@@ -278,8 +277,7 @@ DIOSSA-1 MobilePose checkpoint and trained on 20 keypoints. Raising the
 input from 224 × 224 to 448 × 448 did not improve accuracy, although a further study
 is planned [AD-2] to determine if the network would benefit from a larger input image size at closer distances specifically. 
 
-The QAT model was ``bijou-rasp``, started from ``blest-harl``. L2 pixel error on the
-camera image was 5.303 px on the original image input shape.
+The QAT model was ``bijou-rasp``, started from ``blest-harl``. L2 pixel error was 5.303 px on the original image input shape.
 The accepted loss of accuracy due to quantization was -1.504 px.
 
 .. list-table:: MobilePose, 224x224 input, 20 keypoints. FLOAT vs QAT performance metrics from [AD-1].
@@ -317,8 +315,7 @@ Latency
 
 Both platforms run the same split: the convolutional EDGE part on the
 accelerator, the TAIL part on the CPU through ONNX Runtime. The times below
-are those two pieces, measured separately and then added. They are not
-one timed capture of the whole payload loop. Image decode and the pose
+are those two pieces, measured separately and then added. Image decode and the pose
 solver are not included.
 
 Xilinx
@@ -326,8 +323,8 @@ Xilinx
 
 The Xilinx numbers come from the earlier benchmarking campaign on the Xilinx MPSoC
 that addressed the RID DS-10.
-The DPU time was measured with ``xdputil benchmark`` run for 60 seconds. 
-The CPU time was measured with ``onnxruntime_perf_test`` for 20 seconds and the thread count of that ONNX run was not pinned.
+The DPU time was measured with ``xdputil benchmark`` running for 60 seconds. 
+The CPU time was measured with ``onnxruntime_perf_test`` running for 20 seconds and the thread count of that ONNX run was not pinned.
 
 .. list-table:: Xilinx MPSoC. DPU time and ONNX Runtime head, measured separately.
    :header-rows: 1
@@ -431,31 +428,32 @@ Keypoint regression
 -------------------
 
 On these three frames the red keypoints sit on the same structure as
-the green ones: body, antennae, and nozzle.
+the green ones: body, antennae, and nozzle, but some of the keypoints are sometimes swapped with others
+. This must be studied in more detail to determine if it is a problem with the model or the quantization process.
 
 .. figure:: figures/VisCam_0001775.jpg
    :width: 55%
    :align: center
 
-   MobilePose, ``VisCam_0001775``. Green: ground truth. Red: PolarFire.
+   MobilePose, ``VisCam_0001775``.
 
 .. figure:: figures/VisCam_0012391.jpg
    :width: 55%
    :align: center
 
-   MobilePose, ``VisCam_0012391``. Green: ground truth. Red: PolarFire.
+   MobilePose, ``VisCam_0012391``.
 
 .. figure:: figures/VisCam_0005108.jpg
    :width: 55%
    :align: center
 
-   MobilePose, ``VisCam_0005108``. Green: ground truth. Red: PolarFire.
+   MobilePose, ``VisCam_0005108``.
 
 .. figure:: figures/VisCam_0029974.jpg
    :width: 55%
    :align: center
 
-   MobilePose, ``VisCam_0029974``. Green: ground truth. Red: PolarFire.
+   MobilePose, ``VisCam_0029974``.
 
 Object detection
 ----------------
@@ -463,30 +461,30 @@ Object detection
 On these frames the network returns a detection, and the bounding box falls
 inside the spacecraft. The box is much smaller than the green
 ground-truth extent. That is visible in the samples below. This behavious can be observed 
-in most of the samples consitently and therefore we cannot provide reliable accuracy metrics (IoU, mAP, etc.) for this model.
+in most of the samples consitently and therefore we cannot provide reliable accuracy metrics (IoU, mAP, etc.) for this model. This problem can be caused by the quantization process of the model or by faulty dequantization and further decoding of the output on the CPU. 
 
 .. figure:: figures/VisCam_0002932.jpg
    :width: 70%
    :align: center
 
-   FCOS, ``VisCam_0002932``. Green: ground truth. Red: PolarFire.
+   FCOS, ``VisCam_0002932``.
 
 .. figure:: figures/VisCam_0008192.jpg
    :width: 70%
    :align: center
 
-   FCOS, ``VisCam_0008192``. Green: ground truth. Red: PolarFire.
+   FCOS, ``VisCam_0008192``.
 
 .. figure:: figures/VisCam_0031435.jpg
    :width: 70%
    :align: center
 
-   FCOS, ``VisCam_0031435``. Green: ground truth. Red: PolarFire.
+   FCOS, ``VisCam_0031435``.
 
 Conclusion
 ==========
 
-The QAT model checkpoints from CCN1 compile for VectorBlox and run on the
+The QAT model checkpoints from DIOSSA-CCN1 project were compiled for VectorBlox and run on the
 PolarFire SoC, with the convolutional edge part on the accelerator and the
 tail part on CPU using ONNX Runtime.
 
@@ -496,15 +494,15 @@ VectorBlox core is about eight times the DPU time, and the chain runs
 at 2.4 frames per second. We show that we meet the latency requirements (1Hz) for the application when 
 switching from Xilinx to PolarFire.
 
-On qualitative overlays, MobilePose keypoints follow the ground truth on the
-some frames shown above and not on others. FCOS places a box on the spacecraft, and that box does
+On qualitative overlays, MobilePose keypoints follow the ground truth on
+some of the frames shown above and not on others. FCOS places a box on the spacecraft, and that box does
 not cover the ground-truth extent.
 
 Open items
 ==========
 
-#. Even though the models went through the embedding process, we did not validate the accuracy of the models on the CCN1 test set and therefore counldn't compare if there is a performance difference betwen Xilinx and PolarFire. Additional effort must be put into veryfing what is the underlying reason for the large performance degradation. One possible reason can be due to the quantization process, or because the reused weights from CCN1 are not optimal for quantizing specifically to PolarFire. We might have to look into running QAT tailor for the PolarFire platform. 
+#. Even though the models went through the embedding process, we did not validate the accuracy of the models on the CCN1 test set and therefore counldn't compare if there is a performance difference betwen Xilinx and PolarFire. Additional effort must be put into veryfing what is the underlying reason for the large performance degradation. One possible reason can be due to the quantization process, or because the reused weights from CCN1 are not optimal for quantizing specifically to PolarFire. We might have to look into running QAT tailored for the PolarFire platform. 
 
-#. Consider a smaller object detection model that maintains accuracy when quantizing. FCOS is a quite large model and it is not clear if it is necessary for the application. The single spacecraft object detection task is arguably simplier than the keypoint regression and therefore a smaller model should be sufficient. We shall consider models from the YOLO family as they have been widely used for object detection on embedded devices.
+#. Consider a smaller object detection model that maintains accuracy when quantizing. FCOS is a quite large model and it is not clear if it is necessary for the application. The single spacecraft object detection task is arguably simplier than the keypoint regression task and therefore a smaller model should be sufficient. For example: we can consider models from the YOLO family as they have been widely used for object detection on embedded devices.
 
 #. Verify that both models can be run at the same time on the PolarFire platform. Currently, each model was run one after the other. We shall investigate if they can be run concurrently.
