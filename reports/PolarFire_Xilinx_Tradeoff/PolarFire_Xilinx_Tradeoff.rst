@@ -32,7 +32,7 @@ PolarFire and Xilinx accelerator trade-off
    | **Approved by** |                           |                          |               |          |
    +-----------------+---------------------------+--------------------------+---------------+----------+
 
-This document is of Luxembourg origin and is Copyright © of LMO Sarl.
+This document is of Luxembourg origin. Copyright © LMO Sarl.
 
 Introduction
 ============
@@ -47,8 +47,8 @@ through Vitis-AI 3.5.
 
 This note compares that baseline with the same networks compiled for the
 Microchip PolarFire SoC and its VectorBlox accelerator (SDK 3.1). The
-architectures and the CCN1 weights are unchanged. The item under
-comparison is the accelerator and the compilation path.
+architectures and the CCN1 weights are unchanged. Under comparison
+are the accelerator and the compilation path.
 
 Objective
 ---------
@@ -58,15 +58,15 @@ PolarFire, and to set the measured latency beside the Xilinx DPU and
 CPU-head measurements from the earlier benchmarking campaign.
 
 Accuracy on the PolarFire test set (IoU, keypoint error) is not
-part of this issue yet as described in the Open items section.
+part of this issue yet, as described in the Open items section.
 
 Scope
 -----
 
 This note focuses on two specific models and configurations from CCN1:
 
-  - FCOS for object detection, using an input size of 384 × 288, (HxW) named  ``quare-delf``.
-  - MobilePose for keypoint regression, using an input size of 224 × 224 with 20 keypoints named ``bijou-rasp``.
+  - FCOS for object detection, using an input size of 384 × 288 (W×H), named ``quare-delf``.
+  - MobilePose for keypoint regression, using an input size of 224 × 224 and 20 keypoints, named ``bijou-rasp``.
 
 An additional FCOS network at 640 × 480 resolution was also trained during CCN1 and may be referenced for context, but it was not deployed or compiled for PolarFire as part of this comparison.
 
@@ -170,7 +170,7 @@ Embedding a PyTorch model on PolarFire
 =======================================
 
 VectorBlox does not natively support PyTorch models. 
-To deploy a PyTorch model to PolarFire's FPGA accelerator it must be converted 
+To deploy a PyTorch model on PolarFire's FPGA accelerator, it must be converted
 into VNNX format using the VectorBlox SDK.
 
 We use the following steps:
@@ -179,10 +179,10 @@ We use the following steps:
    accelerator "edge" part. The other is the CPU "tail" part.
 2. Build a calibration sample. One hundred images are taken from the
    CCN1 test sample, resized to the network input, and stored as a
-   NumPy array. The array is normalized to 0 to 1.0 range.
+   NumPy array. The array is normalized to the 0–1.0 range.
 3. Simplify the ONNX graph with ``onnxsim``, so the converter receives a
    static graph without extra nodes or artifacts left from training.
-4. Convert ONNX to full-integer INT8 TensorFlow Lite with ``onnx2tf``.
+4. Convert ONNX to a fully integer INT8 TensorFlow Lite model with ``onnx2tf``.
    This step both translates the graph and quantizes it. The
    calibration array is what the quantizer uses to pick a scale and a
    zero-point per tensor. Mean and standard deviation are used to normalize the calibration array here.
@@ -194,8 +194,8 @@ We use the following steps:
 6. Compile with ``vnnx_compile -s V1000 -c ncomp``. The output is a
    ``.vnnx`` binary for the V1000 core, without weight compression.
 
-If anything fails, it's most likely because the layer is not supported by the compiler
-and the model must be split in a different place.
+If anything fails, it is most likely because a layer is not supported by the compiler,
+in which case the model must be split in a different place.
 
 Why the QAT checkpoints were used
 =================================
@@ -227,13 +227,13 @@ they are not PolarFire numbers.
 Object detection (FCOS)
 -----------------------
 
-During CCN1, FCOS was selected over Faster R-CNN. On a 480 × 640 input the
-float FCOS reached IoU 0.874 and mAP@IoU>0.75 of 0.956, against
+During CCN1, FCOS was selected over Faster R-CNN. On a 640 × 480 input the
+float FCOS reached an IoU of 0.874 and an mAP at IoU > 0.75 of 0.956, against
 0.853 and 0.901 for Faster R-CNN, at 45.78 FPS against 37.66 FPS on the
-RTX 3070, with 32.1 M parameters against 43 M. Additionally, it wasn't possible to train Faster R-CNN with Vitis-AI QAT, so it was dropped from further consideration.
+RTX 3070, with 32.1 M parameters against 43 M. Additionally, it was not possible to train Faster R-CNN with Vitis-AI QAT, so it was dropped from further consideration.
 
-We then lowered the resolution to 384 × 288, because we encountered memory issues when attempting QAT on the full 640 x 480 resolution. The best float model at that size was ``licit-weal``\(IoU 0.925).
-Quantization-aware training from that checkpoint produced ``quare-delf``\ (IoU 0.858). The performance degradation due to quantization was therefore at -0.067 IoU.
+We then lowered the resolution to 384 × 288, because we encountered memory issues when attempting QAT at the full 640 × 480 resolution. The best float model at that size was ``licit-weal`` (IoU 0.925).
+Quantization-aware training from that checkpoint produced ``quare-delf`` (IoU 0.858). IoU therefore fell by 0.067.
 
 .. list-table:: FCOS, 384 × 288. FLOAT vs QAT performance metrics from [AD-1].
    :header-rows: 1
@@ -275,12 +275,12 @@ Keypoint regression (MobilePose)
 The float model selected in CCN1 was ``blest-harl``, initialised from the
 DIOSSA-1 MobilePose checkpoint and trained on 20 keypoints. Raising the
 input from 224 × 224 to 448 × 448 did not improve accuracy, although a further study
-is planned [AD-2] to determine if the network would benefit from a larger input image size at closer distances specifically. 
+is planned [AD-2] to determine whether the network would benefit from a larger input image size, specifically at closer distances.
 
-The QAT model was ``bijou-rasp``, started from ``blest-harl``. L2 pixel error was 5.303 px on the original image input shape.
-The accepted loss of accuracy due to quantization was -1.504 px.
+The QAT model was ``bijou-rasp``, started from ``blest-harl``. Its L2 pixel error was 5.303 px on the camera image.
+The increase in L2 error due to quantization was 1.504 px.
 
-.. list-table:: MobilePose, 224x224 input, 20 keypoints. FLOAT vs QAT performance metrics from [AD-1].
+.. list-table:: MobilePose, 224 × 224 input, 20 keypoints. FLOAT vs QAT performance metrics from [AD-1].
    :header-rows: 1
    :widths: 46 27 27 27
 
@@ -313,8 +313,8 @@ The accepted loss of accuracy due to quantization was -1.504 px.
 Latency
 =======
 
-Both platforms run the same split: the convolutional EDGE part on the
-accelerator, the TAIL part on the CPU through ONNX Runtime. The times below
+Both platforms run the same split: the convolutional edge on the
+accelerator, and the tail on the CPU through ONNX Runtime. The times below
 are those two pieces, measured separately and then added. Image decode and the pose
 solver are not included.
 
@@ -324,7 +324,7 @@ Xilinx
 The Xilinx numbers come from the earlier benchmarking campaign on the Xilinx MPSoC
 that addressed the RID DS-10.
 The DPU time was measured with ``xdputil benchmark`` running for 60 seconds. 
-The CPU time was measured with ``onnxruntime_perf_test`` running for 20 seconds and the thread count of that ONNX run was not pinned.
+The CPU time was measured with ``onnxruntime_perf_test`` running for 20 seconds, and the thread count of that ONNX run was not pinned.
 
 .. list-table:: Xilinx MPSoC. DPU time and ONNX Runtime head, measured separately.
    :header-rows: 1
@@ -344,17 +344,17 @@ The CPU time was measured with ``onnxruntime_perf_test`` running for 20 seconds 
      - 56.3 ms (17.8 FPS)
 
 On the DPU, MobilePose is a small fraction of the processing chain. Almost all of
-the summed time lies in the CPU tail running on the CPU. FCOS is the opposite: the DPU is the
-slow piece, and the CPU tail time is under 5 ms.
+the summed time is spent in the CPU tail. FCOS is the opposite: the DPU is the
+slow part, and the CPU tail is under 5 ms.
 
 PolarFire
 ---------
 
 PolarFire times were measured on the devkit board running VectorBlox SDK 3.1.
-The edge parts of the models were compiled onto the VectorBlox core  with V1000 configuration and no compression.
+The edge parts of the models were compiled onto the VectorBlox core with the V1000 configuration and no compression.
 Each network was run on 50 images from the CCN1
 sample, one loop per image. The standard deviation of the accelerator
-time is 0.01 ms for MobilePose and 0.02 ms for FCOS showing that the measurements are stable.
+time is 0.01 ms for MobilePose and 0.02 ms for FCOS, showing that the measurements are stable.
 
 .. list-table:: PolarFire VectorBlox. Mean over 50 images.
    :header-rows: 1
@@ -372,7 +372,7 @@ time is 0.01 ms for MobilePose and 0.02 ms for FCOS showing that the measurement
    * - ONNX Runtime
      - 16.80 ms
      - 13.37 ms
-   * - End to end
+   * - End-to-end
      - 38.33 ms (26.1 FPS)
      - 409.85 ms (2.44 FPS)
 
@@ -389,18 +389,18 @@ Comparison
    * - MobilePose accelerator
      - 2.95 ms
      - 17.20 ms
-   * - MobilePose end to end
+   * - MobilePose end-to-end
      - 59.8 ms (sum)
      - 38.33 ms
    * - FCOS accelerator
      - 51.81 ms
      - 394.67 ms
-   * - FCOS end to end
+   * - FCOS end-to-end
      - 56.3 ms (sum)
      - 409.85 ms
    * - Full pose estimation chain
-     - 59.8+56.3 = 116.1 ms
-     - 38.33+409.85 = 448.18 ms
+     - 59.8 + 56.3 = 116.1 ms
+     - 38.33 + 409.85 = 448.18 ms
 
 MobilePose on the VectorBlox core is slower than on the DPU (17.2 ms
 against 2.95 ms). The ONNX head on the PolarFire RISC-V cores is faster
@@ -409,11 +409,10 @@ together, the PolarFire chain is the shorter one: 38.3 ms against
 59.8 ms.
 
 FCOS does not follow that pattern. The VectorBlox core takes 395 ms,
-about 7.6 times the DPU, and the head does not compensate. End to end
-is 410 ms, 2.4 frames per second, against 56 ms on the Xilinx's accelerator.
+about 7.6 times the DPU, and the head does not compensate. The end-to-end
+time is 410 ms, 2.4 frames per second, against 56 ms on the Xilinx accelerator.
 
-Therefore we show that we meet the latency requirements (1Hz) for the application when 
-switching from Xilinx to PolarFire.
+Therefore, the latency requirement (1 Hz) is met when switching from Xilinx to PolarFire.
 
 Improving the processing time of the FCOS model on PolarFire and exploring a smaller object detection model are both potential areas for future work, as the current model exhibits excessive complexity relative to the application's requirements.
 
@@ -422,14 +421,16 @@ Qualitative overlays
 
 The figures below are PolarFire outputs from the CCN1 test set,
 drawn on the network input images (224 × 224 for MobilePose, 384 × 288 for
-FCOS). Ground truth is shown in green and predictions in red. Yellow lines show GT and prediciton keypoints pairs. We can observe that for some samples predicitons line up accurately with the ground truth, but for others they do not. These errors are quite large for the outliers and therefore we cannot provide reliable accuracy metrics (L2 pixel error, etc.) for this model.
+FCOS). Ground truth is shown in green and predictions in red. Yellow lines show ground-truth and prediction keypoint pairs.
 
 Keypoint regression
 -------------------
 
-On these three frames the red keypoints sit on the same structure as
-the green ones: body, antennae, and nozzle, but some of the keypoints are sometimes swapped with others
-. This must be studied in more detail to determine if it is a problem with the model or the quantization process.
+For some samples, predictions line up accurately with the ground truth, but for others they do not. These errors are quite large for the outliers, and therefore we cannot provide reliable accuracy metrics (L2 pixel error, etc.) for this model.
+
+On these four frames the red keypoints sit on the same structure as
+the green ones (body, antennas, and nozzle), but some keypoints are swapped with others.
+This must be studied in more detail to determine whether the cause is the model or the quantization process.
 
 .. figure:: figures/VisCam_0001775.jpg
    :width: 55%
@@ -460,8 +461,8 @@ Object detection
 
 On these frames the network returns a detection, and the bounding box falls
 inside the spacecraft. The box is much smaller than the green
-ground-truth extent. That is visible in the samples below. This behavious can be observed 
-in most of the samples consitently and therefore we cannot provide reliable accuracy metrics (IoU, mAP, etc.) for this model. This problem can be caused by the quantization process of the model or by faulty dequantization and further decoding of the output on the CPU. 
+ground-truth extent. That is visible in the samples below. This behaviour can be observed
+consistently in most of the samples, and therefore we cannot provide reliable accuracy metrics (IoU, mAP, etc.) for this model. This problem can be caused by the quantization process, or by faulty dequantization and further decoding of the output on the CPU. 
 
 .. figure:: figures/VisCam_0002932.jpg
    :width: 70%
@@ -484,25 +485,25 @@ in most of the samples consitently and therefore we cannot provide reliable accu
 Conclusion
 ==========
 
-The QAT model checkpoints from DIOSSA-CCN1 project were compiled for VectorBlox and run on the
-PolarFire SoC, with the convolutional edge part on the accelerator and the
-tail part on CPU using ONNX Runtime.
+The QAT checkpoints from the DIOSSA-CCN1 project were compiled for VectorBlox and run on the
+PolarFire SoC, with the convolutional edge on the accelerator and the
+tail on the CPU using ONNX Runtime.
 
-On latency, MobilePose end to end is shorter on PolarFire than the
+On latency, MobilePose end-to-end is shorter on PolarFire than the
 summed Xilinx measurement (38 ms against 60 ms). FCOS is not: the
-VectorBlox core is about eight times the DPU time, and the chain runs
-at 2.4 frames per second. We show that we meet the latency requirements (1Hz) for the application when 
+VectorBlox core takes about 7.6 times the DPU time, and the chain runs
+at 2.4 frames per second. The latency requirement (1 Hz) is met when
 switching from Xilinx to PolarFire.
 
-On qualitative overlays, MobilePose keypoints follow the ground truth on
+On the qualitative overlays, MobilePose keypoints follow the ground truth on
 some of the frames shown above and not on others. FCOS places a box on the spacecraft, and that box does
 not cover the ground-truth extent.
 
 Open items
 ==========
 
-#. Even though the models went through the embedding process, we did not validate the accuracy of the models on the CCN1 test set and therefore counldn't compare if there is a performance difference betwen Xilinx and PolarFire. Additional effort must be put into veryfing what is the underlying reason for the large performance degradation. One possible reason can be due to the quantization process, or because the reused weights from CCN1 are not optimal for quantizing specifically to PolarFire. We might have to look into running QAT tailored for the PolarFire platform. 
+#. Even though the models went through the embedding process, we did not validate their accuracy on the CCN1 test set, and therefore could not compare whether there is a performance difference between Xilinx and PolarFire. Additional effort must be put into verifying the underlying reason for the large performance degradation. One possible reason is the quantization process. Another is that the weights reused from CCN1 are not optimal for quantization on PolarFire specifically. We might have to look into running QAT tailored for the PolarFire platform.
 
-#. Consider a smaller object detection model that maintains accuracy when quantizing. FCOS is a quite large model and it is not clear if it is necessary for the application. The single spacecraft object detection task is arguably simplier than the keypoint regression task and therefore a smaller model should be sufficient. For example: we can consider models from the YOLO family as they have been widely used for object detection on embedded devices.
+#. Consider a smaller object detection model that maintains accuracy when quantized. FCOS is quite a large model, and it is not clear whether it is necessary for the application. Detecting a single spacecraft is arguably simpler than keypoint regression, so a smaller model should be sufficient. For example, models from the YOLO family are widely used for object detection on embedded devices.
 
-#. Verify that both models can be run at the same time on the PolarFire platform. Currently, each model was run one after the other. We shall investigate if they can be run concurrently.
+#. Verify that both models can be run at the same time on the PolarFire platform. So far, each model has been run one after the other. We shall investigate whether they can be run concurrently.
