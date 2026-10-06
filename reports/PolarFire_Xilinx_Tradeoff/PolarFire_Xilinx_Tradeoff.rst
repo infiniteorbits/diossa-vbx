@@ -58,7 +58,7 @@ PolarFire, and to set the measured latency beside the Xilinx DPU and
 CPU-head measurements from the earlier benchmarking campaign.
 
 Accuracy on the PolarFire test set (IoU, keypoint error) is not
-part of this issue yet.
+part of this issue yet as described in the Open items section.
 
 Scope
 -----
@@ -506,3 +506,5 @@ Open items
 #. Even though the models went through the embedding process, we did not validate the accuracy of the models on the CCN1 test set and therefore counldn't compare if there is a performance difference betwen Xilinx and PolarFire. Additional effort must be put into veryfing what is the underlying reason for the large performance degradation. One possible reason can be due to the quantization process, or because the reused weights from CCN1 are not optimal for quantizing specifically to PolarFire. We might have to look into running QAT tailor for the PolarFire platform. 
 
 #. Consider a smaller object detection model that maintains accuracy when quantizing. FCOS is a quite large model and it is not clear if it is necessary for the application. The single spacecraft object detection task is arguably simplier than the keypoint regression and therefore a smaller model should be sufficient. We shall consider models from the YOLO family as they have been widely used for object detection on embedded devices.
+
+#. Verify that both models can be run at the same time on the PolarFire platform. Currently, each model was run one after the other. We shall investigate if they can be run concurrently.
