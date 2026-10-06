@@ -14,4 +14,5 @@ source $REPO_ROOT_DIR/exporting/.venv/bin/activate
 python \
     -m diossa_model_exporter.compare-sample \
     --sample-dir "$REPO_ROOT_DIR/output/images/ccn1-od-384x288-test-sample" \
-    --task boxes
+    --task boxes \
+    "$@"

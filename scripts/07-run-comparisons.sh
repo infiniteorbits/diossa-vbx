@@ -8,6 +8,7 @@ run_comparison() {
     local label="$1"
     local sample_dir="$2"
     local script="$3"
+    shift 3
 
     shopt -s nullglob
     local predictions=( "${sample_dir}/pred/"*.json )
@@ -18,7 +19,7 @@ run_comparison() {
     fi
 
     echo "===> Comparing ${label} (${#predictions[@]} images)..."
-    bash "$script"
+    bash "$script" "$@"
 }
 
 run_comparison \

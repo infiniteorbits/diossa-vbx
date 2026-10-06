@@ -19,4 +19,4 @@ python \
     --input-height 224 \
     --heatmap-width 56 \
     --heatmap-height 56 \
-    --pair-lines
+    "$@"
