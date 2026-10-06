@@ -8,11 +8,6 @@ PolarFire and Xilinx accelerator trade-off
    +------------------------------------------------------------------+
    | Date created: 05/10/2026                                         |
    +------------------------------------------------------------------+
-   | **Status:** DRAFT                                                |
-   |                                                                  |
-   | Latency on both accelerators is included. Sample accuracy        |
-   | scores are not in this issue. The figures are qualitative.       |
-   +------------------------------------------------------------------+
    | **Distribution:**                                                |
    |                                                                  |
    | - LMO (internal),                                                |
@@ -20,11 +15,7 @@ PolarFire and Xilinx accelerator trade-off
    +------------------------------------------------------------------+
    | **Change Log:**                                                  |
    |                                                                  |
-   | -  0.1: First draft. Xilinx accuracy baseline from the CCN1      |
-   |    Design Justification File.                                    |
-   | -  0.2: Deployment split, VectorBlox compile path, QAT weight    |
-   |    selection, Xilinx and PolarFire latency, qualitative          |
-   |    overlays.                                                     |
+   | -  1.0: First release                                            |
    +------------------------------------------------------------------+
 
 .. table::
@@ -57,7 +48,7 @@ through Vitis-AI 3.5.
 This note compares that baseline with the same networks compiled for the
 Microchip PolarFire SoC and its VectorBlox accelerator (SDK 3.1). The
 networks and the CCN1 weights stay the same. What changes is the
-accelerator and the compile path.
+accelerator and the compilation path.
 
 Objective
 ---------
@@ -66,16 +57,16 @@ Show that the CCN1 networks can be compiled and executed on PolarFire,
 and put the measured latency next to the Xilinx DPU and CPU-head
 measurements from the earlier benchmarking campaign.
 
-Accuracy on the PolarFire sample (IoU, keypoint error) is not
-part of this issue. The CCN1 validation numbers remain the accuracy
-record. A few overlays are included so the running chain can be seen.
+Accuracy on the PolarFire test set (IoU, keypoint error) is not
+part of this issue yet.
 
 Scope
 -----
 
 This note focuses on two specific models and configurations from CCN1:
-- FCOS for object detection, using an input size of 384 × 288, checkpointed at ``quare-delf``.
-- MobilePose for keypoint regression, using an input size of 224 × 224 with 20 keypoints, checkpointed at ``bijou-rasp``.
+
+  - FCOS for object detection, using an input size of 384 × 288, (HxW) named  ``quare-delf``.
+  - MobilePose for keypoint regression, using an input size of 224 × 224 with 20 keypoints named ``bijou-rasp``.
 
 An additional FCOS network at 640 × 480 resolution was also trained during CCN1 and may be referenced for context, but it was not deployed or compiled for PolarFire as part of this comparison.
 
@@ -132,7 +123,7 @@ Definitions
    * - FCOS
      - Fully Convolutional One-Stage object detector
    * - QAT
-     - Quantization-aware training. Weights are stored as float32, but they were trained under a fake-quantization constraint.
+     - Quantization-aware training.
    * - VNNX
      - VectorBlox binary executed by the accelerator
 
@@ -181,18 +172,17 @@ into VNNX format using the VectorBlox SDK.
 We use the following steps:
 
 1. Load the PyTorch checkpoint and export two ONNX files. One is the
-   accelerator "edge" part. The other is the CPU "TAIL" part.
+   accelerator "edge" part. The other is the CPU "tail" part.
 2. Build a calibration sample. One hundred images are taken from the
    CCN1 test sample, resized to the network input, and stored as a
-   NumPy array. The array is normalized with the ImageNet mean
-   (0.485, 0.456, 0.406) and standard deviation (0.229, 0.224, 0.225).
+   NumPy array. The array is normalized to 0 to 1.0 range.
 3. Simplify the ONNX graph with ``onnxsim``, so the converter receives a
    static graph without extra nodes or artifacts left from training.
 4. Convert ONNX to full-integer INT8 TensorFlow Lite with ``onnx2tf``.
    This step both translates the graph and quantizes it. The
    calibration array is what the quantizer uses to pick a scale and a
-   zero-point per tensor.
-5. Insert preprocessing with ``tflite_preprocess``. Mean and scale are
+   zero-point per tensor. Mean and standard deviation are used to normalize the calibration array here.
+5. Insert preprocessing with ``tflite_preprocess``. Mean and standard deviation are
    written into the graph, scaled into the 0–255 pixel range, so the
    accelerator consumes the image with the same normalization the
    network was trained with. The tool also inserts the uint8-to-int8
@@ -201,7 +191,8 @@ We use the following steps:
    ``.vnnx`` binary for the V1000 core, without weight compression.
 
 ``vnnx_compile`` is the step that maps the INT8 graph onto the
-VectorBlox core. Anything it rejects stays in the ONNX head from step 1.
+VectorBlox core. If anything fails, it's most likely because the layer is not supported by the compiler
+and the model must be split in a different place.
 
 Why the QAT checkpoints were used
 =================================
@@ -215,7 +206,7 @@ produced and there was nothing to compile.
 The weights that did quantize are the CCN1 quantization-aware
 checkpoints, ``quare-delf`` and ``bijou-rasp``. They are still stored
 as float32. They were trained with Vitis-AI fake quantization, so the
-values already sit on a grid that post-training quantization (PTQ)can
+values already sit on a grid that post-training quantization (PTQ) can
 represent. With those weights the same calibration sample produces a
 finite scale and zero-point, and we can proceed with the compilation.
 
