@@ -47,15 +47,15 @@ through Vitis-AI 3.5.
 
 This note compares that baseline with the same networks compiled for the
 Microchip PolarFire SoC and its VectorBlox accelerator (SDK 3.1). The
-networks and the CCN1 weights stay the same. What changes is the
-accelerator and the compilation path.
+architectures and the CCN1 weights are unchanged. The item under
+comparison is the accelerator and the compilation path.
 
 Objective
 ---------
 
-Show that the CCN1 networks can be compiled and executed on PolarFire,
-and put the measured latency next to the Xilinx DPU and CPU-head
-measurements from the earlier benchmarking campaign.
+The objective is to record whether the CCN1 networks compile and run on
+PolarFire, and to set the measured latency beside the Xilinx DPU and
+CPU-head measurements from the earlier benchmarking campaign.
 
 Accuracy on the PolarFire test set (IoU, keypoint error) is not
 part of this issue yet.
@@ -122,19 +122,23 @@ Definitions
      - The float32 network, evaluated on a GPU
    * - FCOS
      - Fully Convolutional One-Stage object detector
+   * - PTQ
+     - Post-training quantization. Scales and zero-points are computed from a calibration set after training.
    * - QAT
-     - Quantization-aware training.
+     - Quantization-aware training. The stored weights are float32, but training was performed under a fake-quantization constraint.
    * - VNNX
      - VectorBlox binary executed by the accelerator
 
 How the network is split
 ========================
 
-Following the previous DIOSSA phases, each network is split in two.
+Following the previous DIOSSA phases, each network is divided into two
+parts.
 
-The first part runs on the FPGA accelerator, we refer to it as the "edge". It is kept as large as the
-core will accept, so the convolutional trunk uses the accelerator and
-the CPU is left with as little as possible.
+The accelerator part, referred to below as the edge, runs on the FPGA.
+It is made as large as the core will accept, so that the convolutional
+trunk uses the accelerator and the CPU is left with as little work as
+possible.
 
 The second part stays on the CPU. It is the tail that cannot be placed
 on the accelerator. For VectorBlox, the “tail” refers to any part of 
@@ -163,7 +167,7 @@ The same split was used on the Xilinx side:
 the DPU runs an ``.xmodel``, and the post-processing head runs as ONNX on the MPSoC CPU.
 
 Embedding a PyTorch model on PolarFire
-======================================
+=======================================
 
 VectorBlox does not natively support PyTorch models. 
 To deploy a PyTorch model to PolarFire's FPGA accelerator it must be converted 
@@ -190,8 +194,7 @@ We use the following steps:
 6. Compile with ``vnnx_compile -s V1000 -c ncomp``. The output is a
    ``.vnnx`` binary for the V1000 core, without weight compression.
 
-``vnnx_compile`` is the step that maps the INT8 graph onto the
-VectorBlox core. If anything fails, it's most likely because the layer is not supported by the compiler
+If anything fails, it's most likely because the layer is not supported by the compiler
 and the model must be split in a different place.
 
 Why the QAT checkpoints were used
