@@ -1,0 +1,20 @@
+[project]
+name = "nn-models-pytorch"
+requires-python = ">=3.8"
+dynamic = ["version", "dependencies"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "onnxruntime-gpu"]
+
+[build-system]
+requires = ["setuptools>=45", "setuptools-git-versioning"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools-git-versioning]
+enabled = true

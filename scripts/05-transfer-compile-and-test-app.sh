@@ -1,0 +1,52 @@
+#!/bin/bash
+
+set -euo pipefail
+
+DEVICE_IP="${DEVICE_IP:-192.168.20.6}"
+DEVICE_PORT="${DEVICE_PORT:-22}"
+DEVICE_USERNAME="${DEVICE_USERNAME:-root}"
+DEVICE_SDK_PATH="${DEVICE_SDK_PATH:-/root/vbx-sdk}"
+
+REPO_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+APP_NAME="${APP_NAME:-single-model-runner}"
+
+TEST_MODEL_VNNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17.vnnx
+TEST_MODEL_ONNX=output/embedded-models/ccn1--bijou-rasp-epoch17/ccn1--bijou-rasp-epoch17_postprocessing.onnx
+TEST_MODEL_IMAGE=output/images/ccn1-kr-224x224-test-sample/raw/VisCam_0031435.jpg
+
+# TEST_MODEL_VNNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19.vnnx
+# TEST_MODEL_ONNX=output/embedded-models/ccn1--quare-delf-epoch19/ccn1--quare-delf-epoch19_postprocessing.onnx
+# TEST_MODEL_IMAGE=output/images/ccn1-od-384x288-test-sample/raw/VisCam_0031435.jpg
+
+
+echo "===> Transferring apps to device..."
+rsync -avzP \
+    -e "ssh -p $DEVICE_PORT" \
+    "${REPO_ROOT_DIR}/apps/${APP_NAME}" \
+    "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_SDK_PATH}/apps/"
+
+echo "===> Compiling app on device..."
+ssh \
+    -p $DEVICE_PORT \
+    $DEVICE_USERNAME@$DEVICE_IP \
+    "cd $DEVICE_SDK_PATH/apps/${APP_NAME} && (make overlay; make; make stage)"
+
+echo "===> Transferring models/ to device..."
+ssh -p $DEVICE_PORT $DEVICE_USERNAME@$DEVICE_IP "mkdir -p $DEVICE_SDK_PATH/models/"
+rsync -avzP -R \
+    -e "ssh -p $DEVICE_PORT" \
+    "${REPO_ROOT_DIR}/./${TEST_MODEL_VNNX}" \
+    "${REPO_ROOT_DIR}/./${TEST_MODEL_ONNX}" \
+    "${REPO_ROOT_DIR}/./${TEST_MODEL_IMAGE}" \
+    "${DEVICE_USERNAME}@${DEVICE_IP}:${DEVICE_SDK_PATH}/"
+
+echo "====> Test application on device..."
+ssh \
+    -p $DEVICE_PORT \
+    $DEVICE_USERNAME@$DEVICE_IP \
+    "cd $DEVICE_SDK_PATH && \
+    WRITE_OUT=1 ./apps/${APP_NAME}/run-model \
+    ${TEST_MODEL_VNNX} \
+    ${TEST_MODEL_IMAGE} \
+    ${TEST_MODEL_ONNX}"

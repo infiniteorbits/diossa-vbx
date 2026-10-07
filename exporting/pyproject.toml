@@ -1,0 +1,31 @@
+[project]
+name = "diossa_model_exporter"
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+dependencies = [
+    "torch",
+    "onnx",
+    "onnxscript",   
+    "numpy",
+    "tqdm",
+    "nn-models-pytorch",
+    "opencv-python-headless",
+    "requests",
+    "omegaconf",
+    "pandas",
+]
+
+[build-system]
+requires = ["setuptools>=45", "setuptools-git-versioning"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.uv.sources]
+# Path resolved relative to this pyproject.toml
+nn-models-pytorch = { path = "../third-party/nn-models/src_pytorch" }

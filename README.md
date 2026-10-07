@@ -1,99 +1,146 @@
-# VectorBlox 3.1.1 SDK
+# diossa-vbx
 
-The VectorBlox™ SDK compiles quantized INT8 TFLite models into binaries that can be evaluated in the SDK simulator or deployed on Microchip PolarFire® and PolarFire® SoC FPGAs running the VectorBlox™ accelerator.  
+Host-side export and on-device run of the DIOSSA CCN1 vision chain on a Microchip PolarFire SoC with the VectorBlox accelerator.
 
-The shell scripts in the tutorials can be run to demonstrate quantizing and compiling models.
+The payload estimates the 6-DoF pose of a target spacecraft from a monocular image. The chain is two networks in series: FCOS for object detection, then MobilePose for keypoint regression. In CCN1 those networks were trained in floating point, refined with quantization-aware training, and compiled onto a Xilinx DPU (Vitis-AI 3.5, UltraScale+ MPSoC). This repository keeps the CCN1 architectures and weights, and compiles the same quantization-aware checkpoints for VectorBlox SDK 3.1.1 (V1000 core, no weight compression).
 
-You can then run the models using the VectorBlox simulator or on a VectorBlox accelerator deployed on a Microchip FPGA.
+The trade-off against the Xilinx baseline is written up in [`reports/PolarFire_Xilinx_Tradeoff/PolarFire_Xilinx_Tradeoff.rst`](reports/PolarFire_Xilinx_Tradeoff/PolarFire_Xilinx_Tradeoff.rst) (PDF next to the source).
 
-## Getting Started
+## Models
 
+Each network is split the same way it was on Xilinx. The convolutional edge runs on the accelerator. The tail that VectorBlox cannot compile (decoding, NMS, heatmap-to-coordinate) stays on the RISC-V application cores as ONNX, executed by ONNX Runtime. Accelerator outputs are dequantized on the CPU and then fed to that graph.
 
-### Prerequisites
+| Role | Checkpoint | Input (W × H) | Accelerator binary | CPU tail |
+| --- | --- | --- | --- | --- |
+| Keypoint regression | `ccn1--bijou-rasp-epoch17` (QAT, 20 keypoints) | 224 × 224 | `.vnnx` | coords, normalized heatmaps |
+| Object detection | `ccn1--quare-delf-epoch19` (QAT) | 384 × 288 | `.vnnx` | boxes, scores, labels |
 
-To use the VectorBlox SDK, run it in an Ubuntu environment (version 20.04, 22.04, or 24.04).
+The float parents (`ccn1--blest-harl` for MobilePose, `ccn1--licit-weal` for FCOS) are kept under `data/models/` as the accuracy reference. Post-training quantization of those float weights did not produce a finite INT8 scale, so the binaries on the board are the QAT checkpoints. FCOS is exported through `FCOS_PTQ`, which uses `BatchNorm2d` in place of `GroupNorm`, because the quantizer does not accept group norm.
 
-If you use Windows, we recommend installing WSL (Windows Subsystem for Linux) to run Ubuntu. Setup instructions are available here: [Microsoft WSL Install Guide](https://learn.microsoft.com/en-us/windows/wsl/install).
-
-Please note the following considerations when using Windows Subsystem for Linux:
-
-- DNS may not function correctly when connected to a VPN. Disconnect from the VPN while installing or running the VectorBlox Accelerator SDK.
-- Install the SDK in the Linux filesystem, not in the Windows filesystem located at /mnt/c.
-
-For WSL users: Run the SDK from your Ubuntu home directory or ensure the working directory has the correct access permissions.
-
-> If cloning the repo, `git` and `git-lfs` must be installed via `apt install git-lfs && git-lfs install`
-
-### Download the SDK
-
-There are two options for downloading the SDK:
-
-1. Download an archive (zip or tar.gz) from <https://github.com/Microchip-Vectorblox/VectorBlox-SDK/releases>
-
-2. Clone this repository
-
-### Install dependencies (done once, requires sudo permission)
-
-Navigate to the root directory of `VectorBlox-SDK` and run the following command:
+Checkpoints live in `data/models/`. The two FCOS `.ckpt` files are Git LFS objects. After clone:
 
 ```bash
-bash install_dependencies.sh
+git lfs install
+git lfs pull
 ```
 
-### Activate (which installs if needed) the Python 3.10 virtual environment, and set necessary environment variables
+## Layout
+
+```
+apps/single-model-runner/   On-target C++ runner: .vnnx on VectorBlox, HEAD.onnx on ONNX Runtime
+data/                       CCN1 checkpoints, a few earlier .vnnx/.onnx files, camera and 3D model
+exporting/                  diossa_model_exporter: ONNX export, calibration, sample pull, comparison
+output/                     Generated artifacts (most of this is gitignored)
+reports/                    PolarFire/Xilinx note, CCN1 DJF, Xilinx latency logs
+scripts/                    Numbered host pipeline, 00 through 09
+third-party/nn-models/      PyTorch FCOS and MobilePose used at export time
+third-party/onnxruntime/    Docker cross-compile of ONNX Runtime for riscv64
+third-party/vbx-sdk/        VectorBlox SDK 3.1.1 (onnx2tf path, tflite_preprocess, vnnx_compile)
+```
+
+`output/` holds what the scripts produce:
+
+| Path | Contents | In git |
+| --- | --- | --- |
+| `output/images/ccn1-kr-224x224-test-sample/` | MobilePose sample: `raw/`, `gt/`, `annot/`, `pred/`, `pred_annot/` | yes |
+| `output/images/ccn1-od-384x288-test-sample/` | FCOS sample, same subdirectories | yes |
+| `output/embedded-models/<ckpt>/` | ONNX edge, ONNX tail, INT8 TFLite, `.vnnx`, calibration `.npy` | no |
+| `output/latency/` | `latency.csv` and an RST summary | no |
+| `output/sysroot/` | Headers and libs rsynced from the board | no |
+| `output/onnxruntime-riscv64/` | Cross-compiled ONNX Runtime | no |
+
+A sample directory looks like this:
+
+```
+raw/         JPEG at the network input size
+gt/          JSON keypoints and boxes
+annot/       raw image with ground truth drawn
+pred/        JSON tensors written by run-model (WRITE_OUT=1)
+pred_annot/  ground truth in green, prediction in red
+```
+
+`data/camera.json` and `data/model-3d-points.json` are the camera intrinsics and the spacecraft keypoint model used by `exporting/src/diossa_model_exporter/pnp_solver/pose_estimator.py`. The numbered scripts stop at detection and keypoints. Image decode and the pose solver are outside the latency numbers in the note.
+
+## Prerequisites
+
+- Ubuntu host with Docker, `rsync`, and SSH to the PolarFire board.
+- [`uv`](https://docs.astral.sh/uv/) for the export environment (Python 3.12).
+- Git LFS.
+- The VectorBlox SoC demo design already running on the board. `scripts/00-set-up-env.sh` calls `third-party/vbx-sdk/install_dependencies.sh`, which needs sudo.
+- Access to the internal Dataset Viewer (`http://datasets.int.lmo.space`) only if you regenerate the 100-image samples. The checked-in `raw/`, `gt/`, and `annot/` trees are there so the rest of the pipeline runs without that service.
+- Access to `registry.gitlab.com/lmo-space/ios/development/diossa-ccn/docs:latest` only for the PDF build.
+
+The board defaults are in every device script and can be overridden:
+
+| Variable | Default |
+| --- | --- |
+| `DEVICE_IP` | `192.168.20.6` |
+| `DEVICE_PORT` | `22` |
+| `DEVICE_USERNAME` | `root` |
+| `DEVICE_SDK_PATH` | `/root/vbx-sdk` |
+
+## Pipeline
+
+Run from the repository root, in order, the first time you bring up a board. Later steps can be re-run on their own once their inputs exist.
+
+| Script | What it does |
+| --- | --- |
+| `scripts/00-set-up-env.sh` | Install VectorBlox SDK dependencies, create `third-party/vbx-sdk/vbx_env`, and create `exporting/.venv` |
+| `scripts/01-pull-device-sysroot.sh` | Rsync `/lib`, `/usr/include`, and `/usr/lib` from the board into `output/sysroot` |
+| `scripts/02-transfer-sdk-to-device.sh` | Copy SDK `drivers/`, `apps/`, and `lib/` to the board |
+| `scripts/03-compile-onnxruntime.sh` | Cross-compile ONNX Runtime in Docker and rsync headers and `libonnxruntime` to the board |
+| `scripts/04-embed-models.sh` | Pull the CCN1 samples (if needed) and export both QAT networks to `.vnnx` plus a CPU ONNX tail |
+| `scripts/05-transfer-compile-and-test-app.sh` | Build `single-model-runner` on the board and smoke-test MobilePose on one image |
+| `scripts/06-run-inference-on-sample.sh` | Run one model over its 100-image sample and pull `pred/*.json` back |
+| `scripts/07-run-comparisons.sh` | Score keypoints (L2, with optional GT–prediction lines) and boxes (IoU of the top detection), and write `pred_annot/` |
+| `scripts/08-measure-latency.sh` | Time accelerator, dequantize, and ONNX Runtime. Default is 50 images (`NUM_IMAGES`) |
+| `scripts/09-build-doc.sh` | Build the trade-off PDF with the internal Sphinx image |
+
+`06` is wired to one model at a time. `05` smoke-tests MobilePose. `07` compares whichever `pred/` directory already has JSON files and skips the other. `08` measures both models.
+
+`SKIP_EXISTING=1` on `06` leaves images whose JSON is already on the board untouched.
+
+## Embedding
+
+`exporting/scripts/export-mobilepose.sh` and `exporting/scripts/export-fcos.sh` set the checkpoint, input shape, class, remapper, and ImageNet mean and standard deviation, then call `exporting/scripts/export-pytorch-model.sh`. That script is idempotent: each artifact is skipped when the file is already present.
+
+1. Load the checkpoint. A remapper drops Vitis-AI fake-quantizer keys and renames batch-norm weights so they match the export graph. Two ONNX files are written: the accelerator edge and the CPU tail.
+2. Build a calibration array of 100 images from the matching sample, resized to the network input and scaled to 0–1.
+3. Simplify the edge ONNX with `onnxsim`.
+4. Convert and quantize to a fully integer INT8 TFLite graph with `onnx2tf`. The calibration array sets the per-tensor scale and zero-point. Mean and standard deviation are applied there as well.
+5. Run `tflite_preprocess` so the accelerator consumes pixels in 0–255 with the same normalization the network was trained with, and insert the uint8-to-int8 quantize at the input.
+6. Compile with `vnnx_compile -s V1000 -c ncomp`.
+
+Outputs land in `output/embedded-models/<checkpoint-name>/`.
+
+`single-model-runner` pairs VNNX outputs with ONNX inputs by index when the shapes already agree. When they do not, each ONNX input takes the earliest unused VBX output of the same shape, in order. FCOS needs that reorder: the core emits the fifteen maps in execution order, and the CPU graph expects every box map, then every class map, then every centerness map. See [`apps/single-model-runner/README.md`](apps/single-model-runner/README.md).
+
+On the board:
 
 ```bash
-source setup_vars.sh
+WRITE_OUT=1 ./apps/single-model-runner/run-model MODEL.vnnx IMAGE.jpg HEAD.onnx
 ```
 
-When the VBX Python environment is active, the shell prompt will display (vbx_env).
+`WRITE_OUT=1` writes one JSON file per image, next to the JPEG, with `name`, `dtype`, `shape`, and `data` for every ONNX output. `ORT_NUM_THREADS` sets the ONNX Runtime intra-op thread count (default 1).
 
-**Note:** To exit or deactivate the environment, use the following command:
+## Comparison
+
+MobilePose coordinates come back on the 56 × 56 heatmap and are scaled onto the 224 × 224 input before the Euclidean error is computed. FCOS boxes are already in input-image pixels. Each frame has one object, so the box with the highest score is the detection that is scored.
 
 ```bash
-deactivate
+./scripts/07-run-comparisons.sh
 ```
 
-### Run Tutorials
+That calls `exporting/scripts/compare-mobilepose-sample.sh --pair-lines` and `exporting/scripts/compare-fcos-sample.sh`. Yellow lines in the keypoint overlays connect each ground-truth point to its prediction.
 
-We recommend reviewing our tutorials to understand the workflow. These examples demonstrate how to generate CoreVectorBlox-compatible binary files using shell scripts in the [tutorials directory](./tutorials/).
+## Report
 
-Tutorials download the model and convert it to a quantized `.tflite`file if needed.y.
-The model is then compiled into a VectorBlox binary file (`.vnnx, `.hex`, or `.ucomp` extensions) and simulated.
+The note records latency on both platforms and qualitative overlays from the PolarFire run. Accuracy on the full CCN1 test set (IoU, keypoint error) is an open item: the overlays show MobilePose keypoints swapped on some frames, and FCOS boxes that fall inside the spacecraft but do not cover the ground-truth extent.
 
-To run a tutorial shell script, follow these steps:
+On the 50-image PolarFire measurement (V1000, no compression), mean end-to-end time is 38.33 ms for MobilePose and 409.85 ms for FCOS. Added together that is 448 ms, which meets the 1 Hz application budget. The Xilinx sums from the earlier campaign are 59.8 ms and 56.3 ms. Image decode and the pose solver are excluded on both sides. The full tables, the Xilinx FLOAT-versus-QAT accuracy baseline, and the open items are in the RST.
 
 ```bash
-cd $VBX_SDK/tutorials/SOURCE_NAME/MODEL_NAME
-bash MODEL_NAME.sh
+./scripts/09-build-doc.sh
 ```
 
-For a detailed walkthrough of three tutorials, see the [Tutorial Walkthrough Guide](./docs/tutorial_walkthrough_guide.md) in the docs folder.
-
-The docs folder also contains a [Tutorial Metrics Appendix](./docs/tutorial_metrics_appendix.md) with a complete list of tutorials and their metrics.
-
-**For more information on the commands used in the tutorial shell scripts, see the [SDK Programmer's Guide](./docs/VectorBloxPG.md).** A high-level overview of the tutorials is available in the [Tutorial README](./tutorials/README.md).
-
-### After Generating a Binary File with the SDK
-
-After generating a model’s binary file with the SDK, you can run it on a PolarFire FPGA. The 3.1.1 SDK does not support the PolarFire Non-SoC Video Kit.
-
-More information on setting up the PolarFire SoC Video Kit for VectorBlox can be found in the [VectorBlox-SoC-Video-Kit-Demo](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/tree/main) repository.
-
-Refer to the Quickstart Guide in the VectorBlox-SoC-Video-Kit-Demo repository for setup instructions. This guide explains how to configure the PolarFire SoC Video Kit to run a model’s binary file generated by the SDK.
-
-See the Adding Models Markdown file in the VectorBlox-SoC-Video-Kit-Demo repository for instructions on transferring the model’s binary file to the board. This file also explains how to add a compiled model binary to demo_models.h so it can be run on the VectorBlox demo.
-
-## Known Issues
-
-For up-to-date information on known issues for the VectorBlox SDK and Demos, please refer to the [known issues page](./docs/known_issues.md).
-
-## Resources
-
-Model accuracy and performance can be found [here](./tutorials/README.md).
-
-Supported TFLite INT8 operators are listed [here](./docs/OPS.md).
-
-Supported C post-processing is described [here](./docs/C_Postprocessing.md).
-
-For additional information, refer to the SDK [docs folder](./docs).
+The PDF is copied to `reports/PolarFire_Xilinx_Tradeoff/PolarFire_Xilinx_Tradeoff.pdf`. `reports/diossa-ccn1-djf/` is the CCN1 design justification file the note cites. `reports/xilinx-latency-benchmarks/` holds the DPU and ONNX Runtime logs those Xilinx times came from.
